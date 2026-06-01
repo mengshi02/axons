@@ -1,6 +1,17 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* ═══════════════════════════════════════════════════════════════
+   DISABLE MACOS RUBBER BAND SCROLLING
+   Prevents the WKWebView from elastically bouncing when the user
+   scrolls past the edge — makes the app feel like a native desktop
+   app (same as Electron behaviour).
+   ═══════════════════════════════════════════════════════════════ */
+html,
+body {
+  overscroll-behavior: none;
+}
+
 /* Import plugin-sdk theme.css as Single Source of Truth for CSS variables */
 @import './plugin-sdk/theme.css';
 /* Map dark: variant to .moon-theme class so it follows the app theme toggle */
