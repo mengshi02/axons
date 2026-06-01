@@ -1,0 +1,31 @@
+{
+  "newConversation": "New Conversation",
+  "chatHistory": "Chat history",
+  "placeholder": "Ask about your code...",
+  "attachImage": "Attach image",
+  "stopGenerating": "Stop generating",
+  "deleteConversation": "Delete Conversation",
+  "confirmDelete": "Are you sure? This cannot be undone.",
+  "semanticSearch": "Semantic Search",
+  "searchPlaceholder": "Search code semantically...",
+  "relevanceScore": "Relevance score",
+  "noResults": "No results found",
+  "agentThinking": "Thinking...",
+  "agentRunning": "Running {{tool}}...",
+  "agentDone": "Done ({{ms}}ms)",
+  "agentError": "Error",
+  "rateLimitError": "Rate limit exceeded. Please wait and try again.",
+  "authError": "Authentication failed. Please check your API key.",
+  "serverError": "Server error. Please try again later.",
+  "llmError": "Sorry, I encountered an error. Please check your LLM settings.",
+  "embedStarted": "Embedding job started. Semantic search will be available once complete.",
+  "embedFailed": "Failed to trigger embedding",
+  "defaultAgent": {
+    "name": "AI Assistant",
+    "description": "Ask questions about your codebase."
+  },
+  "agent": {
+    "summaryPlaceholder": "One-line summary of this agent's role",
+    "descriptionPlaceholder": "Describe this agent's role, responsibilities and behavior guidelines..."
+  }
+}

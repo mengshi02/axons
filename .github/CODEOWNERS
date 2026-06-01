@@ -1,0 +1,32 @@
+# CODEOWNERS file for Axons
+# 
+# This file defines the code owners for the repository.
+# Code owners are automatically requested for review when someone opens
+# a pull request that modifies code that they own.
+#
+# For more information, see:
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo
+* @mengshi02
+
+# Go backend code
+/cmd/ @mengshi02
+/internal/ @mengshi02
+/pkg/ @mengshi02
+
+# UI code
+/ui/ @mengshi02
+
+# Documentation
+/docs/ @mengshi02
+README.md @mengshi02
+CONTRIBUTING.md @mengshi02
+
+# Skills
+/skills/ @mengshi02
+
+# Build configuration
+Makefile @mengshi02
+go.mod @mengshi02
+go.sum @mengshi02

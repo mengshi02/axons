@@ -1,0 +1,41 @@
+{
+  "projectsTitle": "Projects",
+  "showFilePanel": "Show File Panel",
+  "hideFilePanel": "Hide File Panel",
+  "aiAssistant": "AI Assistant",
+  "menu": "Menu",
+  "settings": "Settings",
+  "extensions": "Extensions",
+  "files": "Files",
+  "code": "Code",
+  "projects": {
+    "watchingChanges": "Watching for changes",
+    "deleteProject": "Delete project",
+    "importProject": "Import Project",
+    "recentImports": "Recent Imports",
+    "removeFromHistory": "Remove from history",
+    "createFailed": "Failed to create project",
+    "handleFailed": "Failed to handle created project",
+    "confirmDelete": "Delete project \"{{name}}\"? This will remove all associated graph data.",
+    "stopWatching": "Stop watching",
+    "startWatching": "Start watching",
+    "startingEmbedding": "Starting embedding...",
+    "embeddingFailed": "Failed to trigger embedding",
+    "embeddingProgress": "Embedding {{current}}/{{total}}",
+    "embeddingDone": "Embedded {{new}} new, {{updated}} updated",
+    "embedSuccess": "Success: {{new}} new, {{updated}} updated",
+    "reembed": "Re-embed (model changed) · {{desc}} desc + {{code}} code",
+    "embedProject": "Embed project · {{desc}} desc + {{code}} code",
+    "buildProject": "Build {{name}}"
+  },
+  "fileTree": {
+    "newFile": "New File",
+    "newFolder": "New Folder",
+    "collapseAll": "Collapse All"
+  },
+  "terminal": {
+    "title": "Terminal",
+    "newTerminal": "New Terminal",
+    "clear": "Clear"
+  }
+}

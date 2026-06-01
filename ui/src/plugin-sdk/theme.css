@@ -1,0 +1,152 @@
+/**
+ * axons Theme CSS Variables — Single Source of Truth
+ *
+ * This file is the ONLY place that defines theme-dependent colors. * Both the host main UI (via @import in index.css) and plugin iframes * (via <link rel="stylesheet" href="/plugin-sdk/theme.css" >) consume it,
+ * so colors are guaranteed to stay in sync across both contexts.
+ *
+ * Two parallel variable namespaces are defined on each theme class: * - --color-* → consumed by Tailwind v4 @theme block (host main UI utilities) * - --axons-* → consumed by plugin iframes (which don't load Tailwind)
+ * * The two namespaces ALWAYS hold the same value within a theme. Do not * diverge them — that's the bug this file was rewritten to prevent.
+ * * Non-theme tokens (fonts, animations, graph node colors, radii) live in * index.css @theme {}
+
+   block; they don't change between moon/sun.
+ */
+
+/* ═══ Moon theme (dark) — purple accent ═══ */
+:root.moon-theme {
+  /* Backgrounds — wider steps for clearer visual hierarchy */
+    --color-void: #06060a;
+    --color-deep: #0a0a12;
+      --color-surface: #0f0f1a;
+      --color-elevated: #1a1a2e;
+      --color-hover: #24243a;
+  --axons-color-void: #06060a;
+  --axons-color-deep: #0a0a12;
+    --axons-color-surface: #0f0f1a;
+    --axons-color-elevated: #1a1a2e;
+    --axons-color-hover: #24243a;
+    /* Borders — brighter for visibility on dark surfaces */
+    --color-border-subtle: #2a2a42;
+    --color-border-default: #3a3a56;
+    --axons-border-subtle: #2a2a42;
+    --axons-border-default: #3a3a56;
+/* Text */
+  --color-text-primary: #e4e4ed;
+  --color-text-secondary: #8888a0;
+  --color-text-muted: #5a5a70;
+  --axons-text-primary: #e4e4ed;
+  --axons-text-secondary: #8888a0;
+  --axons-text-muted: #5a5a70;
+/* Accent — purple */
+  --color-accent: #7c3aed;
+  --color-accent-dim: #5b21b6;
+  --axons-accent: #7c3aed;
+  --axons-accent-dim: #5b21b6;
+/* Status (theme-independent but exposed for plugins) */
+  --axons-success: #10b981;
+  --axons-warning: #f59e0b;
+  --axons-error: #ef4444;
+  --axons-info: #3b82f6;
+/* Shadows */
+  --shadow-glow: 0 0 20px rgba(124, 58, 237, 0.4);
+  --shadow-glow-soft: 0 0 40px rgba(124, 58, 237, 0.15);
+  --axons-shadow-glow: 0 0 20px rgba(124, 58, 237, 0.4);
+  --axons-shadow-soft: 0 0 40px rgba(124, 58, 237, 0.15);
+  --shadow-desktop-menu: 0 8px 30px rgba(0, 0, 0, 0.36), 0 2px 8px rgba(0, 0, 0, 0.16), 0 0 0 1px rgba(255, 255, 255, 0.06);
+
+  /* Plugin-only tokens (fonts/radii). Host UI uses Tailwind utilities for these
+     and reads them from @theme {} in index.css, so no --color-* mirror is needed. */
+  --axons-font-sans: 'Inter', system-ui, sans-serif;
+    --axons-font-mono: 'JetBrains Mono',
+    'Fira Code',
+    monospace;
+  --axons-radius-sm: 4px;
+  --axons-radius-md: 6px;
+  --axons-radius-lg: 8px;
+        /* Select arrow — theme-adaptive via encoded SVG */
+        --axons-select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16'%3E%3Cpath d='M4.5 6l3.5 4 3.5-4z' fill='%238888a0'/%3E%3C/svg%3E");
+}
+
+/* ═══ Sun theme (light) — amber accent ═══ */
+:root.sun-theme {
+  /* Backgrounds */
+    --color-void: #f8fafc;
+    --color-deep: #f1f5f9;
+    --color-surface: #ffffff;
+    --color-elevated: #f8fafc;
+    --color-hover: #e2e8f0;
+    --axons-color-void: #f8fafc;
+    --axons-color-deep: #f1f5f9;
+  --axons-color-surface: #ffffff;
+  --axons-color-elevated: #f8fafc;
+    --axons-color-hover: #e2e8f0;
+  
+    /* Borders */
+    --color-border-subtle: #e2e8f0;
+    --color-border-default: #cbd5e1;
+    --axons-border-subtle: #e2e8f0;
+    --axons-border-default: #cbd5e1;
+  
+    /* Text */
+    --color-text-primary: #1e293b;
+    --color-text-secondary: #64748b;
+    --color-text-muted: #94a3b8;
+    --axons-text-primary: #1e293b;
+    --axons-text-secondary: #64748b;
+    --axons-text-muted: #94a3b8;
+  
+    /* Accent — amber */
+    --color-accent: #f59e0b;
+    --color-accent-dim: #d97706;
+    --axons-accent: #f59e0b;
+    --axons-accent-dim: #d97706;
+  
+    /* Status */
+  --axons-success: #10b981;
+  --axons-warning: #f59e0b;
+  --axons-error: #ef4444;
+  --axons-info: #3b82f6;
+/* Shadows */
+  --shadow-glow: 0 0 20px rgba(245, 158, 11, 0.3);
+  --shadow-glow-soft: 0 0 40px rgba(245, 158, 11, 0.1);
+  --axons-shadow-glow: 0 0 20px rgba(245, 158, 11, 0.3);
+  --axons-shadow-soft: 0 0 40px rgba(245, 158, 11, 0.1);
+  --shadow-desktop-menu: 0 8px 30px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.06);
+
+  /* Plugin-only tokens */
+  --axons-font-sans: 'Inter', system-ui, sans-serif;
+  --axons-font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --axons-radius-sm: 4px;
+  --axons-radius-md: 6px;
+  --axons-radius-lg: 8px;
+  --axons-select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16'%3E%3Cpath d='M4.5 6l3.5 4 3.5-4z' fill='%2364748b'/%3E%3C/svg%3E");
+}
+
+/* ═══ Fallback :root — applies when neither moon-theme nor sun-theme class is present
+   (defensive only; should never be hit in practice since both host and iframe always
+   set one of the two theme classes). Defaults to moon-theme values. ═══ */
+:root {
+  --axons-color-void: #06060a;
+    --axons-color-deep: #0a0a12;
+      --axons-color-surface: #0f0f1a;
+      --axons-color-elevated: #1a1a2e;
+      --axons-color-hover: #24243a;
+      --axons-border-subtle: #2a2a42;
+      --axons-border-default: #3a3a56;
+    --axons-text-primary: #e4e4ed;
+    --axons-text-secondary: #8888a0;
+    --axons-text-muted: #5a5a70;
+    --axons-accent: #7c3aed;
+    --axons-accent-dim: #5b21b6;
+  --axons-success: #10b981;
+  --axons-warning: #f59e0b;
+  --axons-error: #ef4444;
+  --axons-info: #3b82f6;
+  --axons-font-sans: 'Inter', system-ui, sans-serif;
+    --axons-font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+    --axons-shadow-glow: 0 0 20px rgba(124, 58, 237, 0.4);
+    --axons-shadow-soft: 0 0 40px rgba(124, 58, 237, 0.15);
+  --axons-radius-sm: 4px;
+  --axons-radius-md: 6px;
+  --axons-radius-lg: 8px;
+  --axons-select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16'%3E%3Cpath d='M4.5 6l3.5 4 3.5-4z' fill='%238888a0'/%3E%3C/svg%3E");
+}

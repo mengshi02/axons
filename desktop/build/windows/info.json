@@ -1,0 +1,15 @@
+{
+  "fixed": {
+    "fileVersion": "1.0.0",
+    "productVersion": "1.0.0"
+  },
+  "strings": {
+    "CompanyName": "Axons Team",
+    "ProductName": "Axons",
+    "ProductVersion": "1.0.0",
+    "FileVersion": "1.0.0",
+    "FileDescription": "Axons - Code Analysis Tool",
+    "LegalCopyright": "Copyright © 2026 Axons Team",
+    "OriginalFilename": "axons.exe"
+  }
+}

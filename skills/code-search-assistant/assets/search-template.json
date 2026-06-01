@@ -1,0 +1,31 @@
+{
+  "query": "",
+  "mode": "keyword|semantic|regex|exact",
+  "timestamp": "",
+  "results": [
+    {
+      "id": 0,
+      "name": "",
+      "kind": "",
+      "file": "",
+      "line": 0,
+      "signature": "",
+      "score": 0.0,
+      "context": ""
+    }
+  ],
+  "summary": {
+    "total_results": 0,
+    "top_matches": [],
+    "search_time_ms": 0
+  },
+  "facets": {
+    "by_kind": {
+      "function": 0,
+      "class": 0,
+      "interface": 0,
+      "method": 0
+    },
+    "by_directory": {}
+  }
+}

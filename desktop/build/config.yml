@@ -1,0 +1,38 @@
+version: '3'
+
+info:
+  companyName: "Axons"
+  productName: "Axons"
+  productIdentifier: "com.axons.desktop"
+  description: "Code Analysis Tool"
+  copyright: "(c) 2026, Axons Team"
+  comments: "Code Analysis Tool"
+  version: "1.0.0"
+
+dev_mode:
+  root_path: ..
+  log_level: warn
+  debounce: 1000
+  ignore:
+    dir:
+      - .git
+      - node_modules
+      - ui/node_modules
+      - bin
+    file:
+      - .DS_Store
+      - .gitignore
+    watched_extension:
+      - "*.go"
+    git_ignore: true
+  executes:
+    - cmd: wails3 task common:install:frontend:deps
+      type: once
+    - cmd: wails3 task common:dev:frontend
+      type: background
+    - cmd: go mod tidy
+      type: blocking
+    - cmd: wails3 task build
+      type: blocking
+    - cmd: wails3 task run
+      type: primary

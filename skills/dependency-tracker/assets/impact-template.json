@@ -1,0 +1,48 @@
+{
+  "symbol": {
+    "name": "",
+    "id": 0,
+    "kind": "",
+    "file": "",
+    "line": 0
+  },
+  "dependency_analysis": {
+    "direct_callers": 0,
+    "direct_callees": 0,
+    "impact_radius": 0,
+    "max_depth_analyzed": 0
+  },
+  "callers": [
+    {
+      "name": "",
+      "file": "",
+      "line": 0,
+      "depth": 1
+    }
+  ],
+  "callees": [
+    {
+      "name": "",
+      "file": "",
+      "line": 0
+    }
+  ],
+  "impact_scope": {
+    "total_affected": 0,
+    "by_depth": {
+      "depth_1": 0,
+      "depth_2": 0,
+      "depth_3": 0
+    }
+  },
+  "circular_dependencies": [
+    {
+      "nodes": [],
+      "length": 0
+    }
+  ],
+  "risk_assessment": {
+    "level": "low|medium|high",
+    "factors": []
+  }
+}

@@ -1,0 +1,19 @@
+// ESM shim: re-export axons-plugin-ui from the UMD global set by axons-plugin-ui.umd.js
+const UI = window.AxonsPluginUI;
+export const Button = UI.Button;
+export const Card = UI.Card;
+export const CardHeader = UI.CardHeader;
+export const CardBody = UI.CardBody;
+export const Input = UI.Input;
+export const Select = UI.Select;
+export const Textarea = UI.Textarea;
+export const Badge = UI.Badge;
+export const Divider = UI.Divider;
+export const EmptyState = UI.EmptyState;
+export const Spinner = UI.Spinner;
+export const ProgressBar = UI.ProgressBar;
+export const List = UI.List;
+export const ListItem = UI.ListItem;
+export const Tabs = UI.Tabs;
+export const ConfirmDialog = UI.ConfirmDialog;
+export const Modal = UI.Modal;

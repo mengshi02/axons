@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Axons
+Comment=Secure Native Code Analysis & Generation Agent
+Exec=axons
+Icon=axons
+Type=Application
+Categories=Development;IDE;
+StartupNotify=true
+StartupWMClass=Axons

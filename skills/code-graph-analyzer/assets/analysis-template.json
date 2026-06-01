@@ -1,0 +1,49 @@
+{
+  "project": {
+    "name": "",
+    "path": "",
+    "analyzed_at": ""
+  },
+  "summary": {
+    "total_functions": 0,
+    "total_classes": 0,
+    "total_interfaces": 0,
+    "total_files": 0,
+    "average_complexity": 0
+  },
+  "quality_metrics": {
+    "cycles_found": 0,
+    "dead_code_count": 0,
+    "high_complexity_count": 0,
+    "test_coverage_estimate": 0
+  },
+  "recommendations": [
+    {
+      "type": "cycle",
+      "severity": "high",
+      "description": "",
+      "affected_symbols": []
+    },
+    {
+      "type": "dead_code",
+      "severity": "medium",
+      "description": "",
+      "affected_symbols": []
+    },
+    {
+      "type": "complexity",
+      "severity": "medium",
+      "description": "",
+      "affected_symbols": []
+    }
+  ],
+  "hotspots": [
+    {
+      "function": "",
+      "complexity": 0,
+      "callers": 0,
+      "file": "",
+      "line": 0
+    }
+  ]
+}

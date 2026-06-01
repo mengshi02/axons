@@ -1,0 +1,52 @@
+{
+  "action": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "close": "Close",
+    "refresh": "Refresh",
+    "delete": "Delete",
+    "confirm": "Confirm",
+    "edit": "Edit",
+    "start": "Start",
+    "stop": "Stop",
+    "install": "Install",
+    "uninstall": "Uninstall",
+    "import": "Import",
+    "testing": "Testing...",
+    "saving": "Saving...",
+    "loading": "Loading..."
+  },
+  "status": {
+    "running": "Running",
+    "stopped": "Stopped",
+    "starting": "Starting",
+    "crashed": "Crashed",
+    "installed": "Installed",
+    "imported": "Imported",
+    "configured": "Configured",
+    "notConfigured": "Not Configured",
+    "installing": "installing"
+  },
+  "unit": {
+    "nodes_one": "{{count}} node",
+    "nodes_other": "{{count}} nodes",
+    "edges_one": "{{count}} edge",
+    "edges_other": "{{count}} edges",
+    "callers_one": "{{count}} caller",
+    "callers_other": "{{count}} callers",
+    "callees_one": "{{count}} callee",
+    "callees_other": "{{count}} callees",
+    "embeddings_one": "{{count}} embedding",
+    "embeddings_other": "{{count}} embeddings"
+  },
+  "error": {
+    "loadFailed": "Failed to load data",
+    "connectionFailed": "Connection failed",
+    "unknownError": "Unknown error",
+    "importFailed": "Import failed: {{message}}"
+  },
+  "search": {
+    "nodesPlaceholder": "Search nodes...",
+    "fullTextPlaceholder": "Full text search... (Enter)"
+  }
+}

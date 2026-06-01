@@ -1,0 +1,317 @@
+package plugin
+
+import (
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/mengshi02/axons/internal/i18n"
+	"github.com/mengshi02/axons/internal/logger"
+	"go.uber.org/zap"
+)
+
+// HandlePluginProxy handles reverse proxy requests for plugin backends (Web mode).
+// Desktop mode uses direct connections — this handler is only used for Web clients
+// that cannot reach 127.0.0.1 plugin ports directly.
+func (m *Manager) HandlePluginProxy(w http.ResponseWriter, r *http.Request, pluginID string) {
+	inst, ok := m.GetInstance(pluginID)
+	if !ok {
+		http.Error(w, i18n.T("api.error.pluginNotFound"), http.StatusNotFound)
+		return
+	}
+
+	if inst.Endpoint == "" {
+		http.Error(w, "plugin has no backend endpoint", http.StatusNotFound)
+		return
+	}
+
+	target, err := url.Parse(inst.Endpoint)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid plugin endpoint: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Extract the path after the proxy prefix
+	// Route pattern: /v1/plugins/:id/proxy/*path
+	// The path we need to forward is everything after /v1/plugins/{id}/proxy/
+	proxyPath := r.URL.Path
+	proxyPrefix := fmt.Sprintf("/v1/plugins/%s/proxy", pluginID)
+	if strings.HasPrefix(proxyPath, proxyPrefix) {
+		proxyPath = strings.TrimPrefix(proxyPath, proxyPrefix)
+		if proxyPath == "" {
+			proxyPath = "/"
+		}
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.FlushInterval = -1 // Immediate flush for SSE support
+
+	// Handle backend errors gracefully (e.g., plugin crashed mid-request)
+	// Without this, ReverseProxy panics with http.ErrAbortHandler on write failures.
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		if strings.Contains(err.Error(), "context canceled") || strings.Contains(err.Error(), "unexpected EOF") {
+			// Client disconnected or backend shut down — not an error worth logging loudly
+			return
+		}
+		http.Error(w, fmt.Sprintf("plugin proxy error: %v", err), http.StatusBadGateway)
+	}
+
+	// Deduplicate CORS headers: the CORS middleware sets Access-Control-Allow-Origin
+	// before the handler runs, and the backend (e.g., FastAPI) may also set it.
+	// copyHeader (called after modifyResponse) uses Header.Add() which would create
+	// duplicates ("*, *"). We delete the backend's CORS header here so it won't be
+	// copied — the middleware's value is sufficient.
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		resp.Header.Del("Access-Control-Allow-Origin")
+		return nil
+	}
+
+	// Rewrite the request
+	r.URL.Path = proxyPath
+	r.URL.RawPath = proxyPath
+	r.Host = target.Host
+
+	// Preserve query parameters
+	// ReverseProxy panics with http.ErrAbortHandler when the client disconnects
+	// mid-response. This is standard Go library behavior — recover it gracefully.
+	defer func() {
+		if rec := recover(); rec != nil {
+			if rec == http.ErrAbortHandler {
+				logger.Warn("plugin proxy: client disconnected during response",
+					zap.String("plugin", pluginID),
+					zap.String("path", r.URL.Path),
+				)
+				return
+			}
+			panic(rec)
+		}
+	}()
+	proxy.ServeHTTP(w, r)
+}
+
+// HandlePluginStaticFiles serves plugin UI static files (js, css, icons, etc.)
+// Route: /plugins/{id}/*filepath
+// Files are served from the plugin's directory on disk.
+func (m *Manager) HandlePluginStaticFiles(w http.ResponseWriter, r *http.Request, pluginID string, filePath string) {
+	inst, ok := m.GetInstance(pluginID)
+	if !ok {
+		// Also check installed (but not running) plugins for frontend-only
+		plugins, _ := m.ScanPlugins()
+		found := false
+		for _, p := range plugins {
+			if p.ID == pluginID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			http.Error(w, "plugin not found", http.StatusNotFound)
+			return
+		}
+	}
+
+	// Determine the plugin directory
+	var pluginDir string
+	if ok {
+		pluginDir = inst.Manifest.Dir
+	} else {
+		// Look up from scan
+		plugins, _ := m.ScanPlugins()
+		for _, p := range plugins {
+			if p.ID == pluginID {
+				pluginDir = p.Dir
+				break
+			}
+		}
+	}
+
+	if pluginDir == "" {
+		http.Error(w, "plugin directory not found", http.StatusNotFound)
+		return
+	}
+
+	// Security: clean the path and verify it doesn't escape the plugin directory
+	cleanPath := filepath.Clean("/" + filePath)
+	fullPath := filepath.Join(pluginDir, cleanPath)
+	absPluginDir, err := filepath.Abs(pluginDir)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	absFullPath, err := filepath.Abs(fullPath)
+	if err != nil || !strings.HasPrefix(absFullPath, absPluginDir+string(os.PathSeparator)) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	// Allow same-origin iframe embedding for plugin static resources
+	w.Header().Set("Content-Security-Policy", "frame-ancestors 'self'")
+
+	http.ServeFile(w, r, absFullPath)
+}
+
+// iframeHostTemplate is the HTML template for plugin iframe containers.
+// It is dynamically generated by the daemon with CSP nonce and runtime config.
+const iframeHostTemplate = `<!DOCTYPE html>
+<html lang="en" class="{{.ThemeClass}}">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{.PluginID}}</title>
+  <link rel="stylesheet" href="/plugin-sdk/theme.css" />
+  <link rel="stylesheet" href="/plugin-sdk/components.css" />
+  <style>
+    html, body, #root { height: 100%; }
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: var(--axons-color-surface, #101018);
+      color: var(--axons-text-primary, #e4e4ed);
+      font-family: var(--axons-font-sans, 'Inter', system-ui, sans-serif);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script nonce="{{.Nonce}}">
+    window.__AXONS_PLUGIN__ = {
+      pluginId: {{.PluginIDJSON}},
+      endpoint: {{.EndpointJSON}},
+      runtimeMode: {{.RuntimeModeJSON}},
+      protocolVersion: 1
+    };
+  </script>
+  <!-- Load UMD libraries first (set window globals for ESM shims) -->
+  <script nonce="{{.Nonce}}" src="/plugin-sdk/vendor/react.umd.js"></script>
+  <script nonce="{{.Nonce}}" src="/plugin-sdk/axons-plugin-ui.umd.js"></script>
+  <script nonce="{{.Nonce}}" src="/plugin-sdk/iframe-adapter.umd.js"></script>
+  <!-- Import map: map bare specifiers to ESM shim files that read from window globals -->
+  <script type="importmap" nonce="{{.Nonce}}">
+    {
+      "imports": {
+        "react": "/plugin-sdk/vendor/react.js",
+        "react-dom": "/plugin-sdk/vendor/react-dom.js",
+        "react/jsx-runtime": "/plugin-sdk/vendor/react-jsx-runtime.js",
+        "axons-plugin-ui": "/plugin-sdk/vendor/axons-plugin-ui.js"
+      }
+    }
+  </script>
+  <!-- Bootstrap: load plugin as ES module with self-start logic -->
+  <script type="module" nonce="{{.Nonce}}">
+    import PluginComponent from '/plugins/{{.PluginID}}/ui/index.js';
+    import { IframePluginApiAdapter } from '/plugin-sdk/iframe-adapter.esm.js';
+    import React from 'react';
+    import { createRoot } from 'react-dom';
+
+    const adapter = new IframePluginApiAdapter();
+    adapter.init().then(({ pluginId }) => {
+      const pluginApi = adapter;
+      const onClose = () => adapter.onClose();
+      const root = createRoot(document.getElementById('root'));
+      root.render(React.createElement(PluginComponent, { pluginApi, onClose }));
+    });
+  </script>
+</body>
+</html>`
+
+// HandlePluginIframeHost renders the iframe container HTML and sets CSP headers.
+// Route: GET /v1/plugins/:id/iframe-host
+func (m *Manager) HandlePluginIframeHost(w http.ResponseWriter, r *http.Request, pluginID string) {
+	// Validate pluginID format (prevent template injection)
+	if !validPluginID.MatchString(pluginID) {
+		http.Error(w, "invalid plugin id", http.StatusBadRequest)
+		return
+	}
+
+	// Get plugin endpoint if available
+	var endpoint string
+	if inst, ok := m.GetInstance(pluginID); ok && inst.Endpoint != "" {
+		endpoint = inst.Endpoint
+	}
+
+	// Determine runtime mode
+	runtimeMode := m.GetRuntimeMode()
+
+	// Generate one-time nonce for CSP
+	nonceBytes := make([]byte, 16)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	nonce := base64.StdEncoding.EncodeToString(nonceBytes)
+
+	// Build CSP
+	// Desktop mode (WKWebView): sandbox iframe origin is "null", so 'self' resolves
+	// to empty string and is ignored. WKWebView also doesn't support port wildcards
+	// (http://127.0.0.1:*). Use concrete daemon/plugin URLs instead.
+	// Web mode (Chrome/Firefox): 'self' works correctly in sandbox iframes.
+	var csp string
+	if runtimeMode == "desktop" {
+		daemonOrigin := fmt.Sprintf("http://127.0.0.1:%d", m.axonsPort)
+		connectSrc := daemonOrigin
+		if endpoint != "" {
+			connectSrc += " " + endpoint
+		}
+		csp = fmt.Sprintf(
+			"default-src %s; "+
+				"script-src %s 'nonce-%s'; "+
+				"style-src %s 'unsafe-inline'; "+
+				"img-src %s data:; "+
+				"connect-src %s; "+
+				"frame-ancestors %s",
+			daemonOrigin, daemonOrigin, nonce, daemonOrigin, daemonOrigin, connectSrc, daemonOrigin,
+		)
+	} else {
+		csp = fmt.Sprintf(
+			"default-src 'self'; "+
+				"script-src 'self' 'nonce-%s'; "+
+				"style-src 'self' 'unsafe-inline'; "+
+				"img-src 'self' data:; "+
+				"connect-src 'self'; "+
+				"frame-ancestors 'self'",
+			nonce,
+		)
+	}
+	w.Header().Set("Content-Security-Policy", csp)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	pluginIDJSON, _ := json.Marshal(pluginID)
+	endpointJSON, _ := json.Marshal(endpoint)
+	runtimeModeJSON, _ := json.Marshal(runtimeMode)
+
+	// Determine initial theme class from query parameter (?theme=moon|sun).
+	// The host (IframePluginPanel) appends the current theme to the iframe src so
+	// that the first paint matches the host theme, eliminating the dark→light
+	// flicker for users running the sun (light) theme.
+	// Whitelist values strictly; fall back to moon-theme on anything unexpected.
+	// The host will still send plugin:theme postMessage on subsequent theme changes.
+	themeClass := "moon-theme"
+	switch r.URL.Query().Get("theme") {
+	case "sun":
+		themeClass = "sun-theme"
+	case "moon":
+		themeClass = "moon-theme"
+	}
+
+	tmpl := template.Must(template.New("host").Parse(iframeHostTemplate))
+	_ = tmpl.Execute(w, map[string]any{
+		"PluginID":        pluginID,
+		"Nonce":           nonce,
+		"PluginIDJSON":    template.JS(pluginIDJSON),
+		"EndpointJSON":    template.JS(endpointJSON),
+		"RuntimeModeJSON": template.JS(runtimeModeJSON),
+		"ThemeClass":      themeClass,
+	})
+}

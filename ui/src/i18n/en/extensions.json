@@ -1,0 +1,22 @@
+{
+  "title": "Extensions",
+  "noExtensions": "No extensions found",
+  "placePlugins": "Place plugins in ~/.axons/plugins/",
+  "importPlugin": "Import plugin from .tar.gz",
+  "scanPlugins": "Scan for new plugins",
+  "onlyTarGz": "Only .tar.gz archives are supported",
+  "installLog": "Install Log",
+  "uninstallTitle": "Uninstall Plugin",
+  "uninstallMessage": "Are you sure you want to uninstall this plugin?",
+  "uninstallConfirm": "Uninstall",
+  "startingInstall": "Starting installation...",
+  "installComplete": "Installation completed successfully.",
+  "installFailed": "Installation failed: {{error}}",
+  "category": {
+    "all": "All",
+    "analysis": "Analysis",
+    "visualization": "Visualization",
+    "search": "Search",
+    "productivity": "Productivity"
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "title": "Axons",
+  "subtitle": "Visualize and explore your codebase as an interactive graph",
+  "recentImports": "Recent Imports",
+  "removeFromHistory": "Remove from history",
+  "dropFolder": "Drop a folder here or click to browse",
+  "supportedLanguages": "Supports Go, TypeScript, JavaScript, Python, and more",
+  "or": "or",
+  "importing": "Importing...",
+  "importFrom": "Import from Local Path or Remote URL",
+  "importHint": "Import from local directory or clone from GitHub",
+  "features": {
+    "visualize": {
+      "title": "Visualize",
+      "desc": "Interactive graph view"
+    },
+    "explore": {
+      "title": "Explore",
+      "desc": "Search & navigate"
+    },
+    "ai": {
+      "title": "AI Assistant",
+      "desc": "Agent powered"
+    }
+  },
+  "building": {
+    "title": "Building Knowledge Graph",
+    "analyzing": "Analyzing {{name}}",
+    "parsing": "Parsing source files...",
+    "extracting": "Extracting code structure...",
+    "building": "Building relationships...",
+    "hint": "This may take a few moments depending on project size"
+  },
+  "importDialog": {
+    "title": "Import Project",
+    "local": "Local",
+    "remoteUrl": "Remote URL",
+    "importExisting": "Import existing",
+    "createNew": "Create new",
+    "projectPath": "Project Path",
+    "projectPathHint": "Enter the absolute path to your local project directory",
+    "projectName": "Project Name",
+    "location": "Location (parent directory)",
+    "locationHint": "Project will be created at: {{location}}/{{name}}",
+    "language": "Language",
+    "initGit": "Initialize git repository",
+    "repoUrl": "Repository URL",
+    "repoUrlHint": "GitHub URL (supports HTTPS and SSH formats)",
+    "advancedOptions": "Advanced options",
+    "branch": "Branch",
+    "cloneLocation": "Clone Location",
+    "managed": "Managed",
+    "managedHint": "Clone to ~/.axons/repos/{provider}/{owner}/{repo}",
+    "custom": "Custom",
+    "customHint": "Clone to a custom workspace directory",
+    "workspacePath": "Workspace Path",
+    "autoWatch": "Auto-watch file changes",
+    "cancel": "Cancel",
+    "cloneAndImport": "Clone & Import",
+    "create": "Create",
+    "import": "Import",
+    "creating": "Creating...",
+    "cloning": "Cloning...",
+    "errorLocalPath": "Please enter a local path",
+    "errorAbsolutePath": "Please enter an absolute path (e.g. /Users/you/myproject)",
+    "errorProjectName": "Please enter a project name",
+    "errorLocation": "Please enter a location",
+    "errorAbsoluteLocation": "Please enter an absolute path for location (e.g. /Users/you/workspace)",
+    "errorRemoteUrl": "Please enter a remote URL",
+    "errorCreateFailed": "Failed to create project",
+    "errorCloneFailed": "Failed to clone repository"
+  }
+}

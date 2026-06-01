@@ -1,0 +1,105 @@
+{
+  "codeHealth": {
+    "title": "Code Health",
+    "tab": {
+      "hotspots": "Hotspots",
+      "deadcode": "Dead Code",
+      "cochange": "Co-Change"
+    },
+    "hotspotDesc": "Functions with highest call coupling (fan-in × 2 + fan-out)",
+    "noHotspots": "No hotspots found",
+    "unreachable": "Unreachable functions ({{count}})",
+    "noDeadCode": "No unreachable code found",
+    "unusedExports": "Unused exports ({{count}})",
+    "noUnusedExports": "No unused exports found",
+    "score": "score"
+  },
+  "graphAnalytics": {
+    "title": "Graph Analytics",
+    "tab": {
+      "metrics": "Metrics",
+      "pagerank": "PageRank",
+      "communities": "Modules",
+      "cycles": "Cycles"
+    },
+    "nodes": "Nodes",
+    "edges": "Edges",
+    "communities": "Communities",
+    "cyclesScc": "Cycles (SCCs)",
+    "degree": "Degree",
+    "avgInDegree": "Avg In-Degree",
+    "avgOutDegree": "Avg Out-Degree",
+    "maxInDegree": "Max In-Degree",
+    "maxOutDegree": "Max Out-Degree",
+    "structure": "Structure",
+    "density": "Density",
+    "largestScc": "Largest SCC",
+    "modularity": "Modularity",
+    "isDag": "Is DAG",
+    "pagerankDesc": "Most important nodes by random-walk probability (higher = more central)",
+    "noData": "No data. Build the graph first."
+  },
+  "impact": {
+    "title": "Impact Analysis",
+    "tab": {
+      "impact": "Impact",
+      "callchain": "Call Chain"
+    },
+    "depth": "Depth",
+    "all": "All",
+    "selectFrom": "From",
+    "selectTo": "To",
+    "findChain": "Find Chain",
+    "enterValidNodeIds": "Please enter valid node IDs",
+    "affectedNodes": "Affected nodes",
+    "directCallers": "Direct callers"
+  },
+  "cfg": {
+    "title": "CFG / Dataflow",
+    "tab": {
+      "cfg": "CFG",
+      "dataflow": "Dataflow"
+    }
+  },
+  "sequence": {
+    "title": "Sequence",
+    "enterFunction": "Enter function name",
+    "depth": "Depth",
+    "generate": "Generate",
+    "copyMermaid": "Copy Mermaid"
+  },
+  "rules": {
+    "title": "Architecture Rules",
+    "ruleName": "Rule name *",
+    "noRules": "No rules defined yet"
+  },
+  "flow": {
+    "title": "Execution Flows",
+    "detect": "Detect",
+    "detecting": "Detecting…",
+    "redetect": "Re-detect",
+    "processes_one": "{{count}} process",
+    "processes_other": "{{count}} processes",
+    "loading": "Loading…",
+    "noProcesses": "No processes detected yet.",
+    "buildOrRedetect": "Build a project first or click Re-detect.",
+    "stepCount_one": "{{count}} step",
+    "stepCount_other": "{{count}} steps",
+    "selectToView": "Select a process to see its execution steps",
+    "loadingSteps": "Loading steps…"
+  },
+  "codeRef": {
+    "preview": "Preview",
+    "source": "Source",
+    "searchPlaceholder": "Search...",
+    "previous": "Previous",
+    "next": "Next",
+    "copyCode": "Copy code",
+    "editFile": "Edit file"
+  },
+  "changeList": {
+    "previewDiff": "Preview diff",
+    "revertFile": "Revert this file",
+    "noDifferences": "No differences to display"
+  }
+}

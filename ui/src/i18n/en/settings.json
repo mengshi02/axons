@@ -1,0 +1,44 @@
+{
+  "title": "Settings",
+  "tab": {
+    "theme": "Theme",
+    "embedding": "Embedding",
+    "llm": "LLM",
+    "rerank": "Rerank",
+    "rag": "RAG",
+    "language": "Language"
+  },
+  "theme": {
+    "description": "Choose your preferred theme. The moon theme is dark with purple accents, perfect for night use. The sun theme is light and bright, ideal for daytime.",
+    "moon": { "name": "Moon", "desc": "Dark & purple" },
+    "sun": { "name": "Sun", "desc": "Light & bright" }
+  },
+  "embedding": {
+    "enable": "Enable auto-embedding after build",
+    "provider": "Provider",
+    "apiKey": "API Key",
+    "model": "Model",
+    "baseUrl": "Base URL",
+    "testConnection": "Test Connection",
+    "maxContextTokens": "Max Context Tokens (n_ctx)",
+    "maxContextTokensHint": "Set to 0 to use default (512 tokens). Required for local services where n_ctx cannot be queried.",
+    "selectProvider": "Select a provider",
+    "enterApiKey": "Enter your API key",
+    "modelName": "Model name",
+    "connected": "Connected! Model: {{model}}, Dimension: {{dimension}}"
+  },
+  "llm": {
+    "enable": "Enable LLM Agent",
+    "enableDesc": "Allow AI assistant to answer questions",
+    "noModels": "No models configured yet. Click + to add one.",
+    "addModel": "Add Model",
+    "newModel": "New Model",
+    "defaultEndpoint": "default endpoint",
+    "multimodal": "multimodal",
+    "unnamed": "Unnamed"
+  },
+  "language": {
+    "description": "Select your preferred language. Additional languages can be installed via extension plugins.",
+    "onlyDefault": "Only English is available by default. Install a language pack extension for more languages."
+  }
+}

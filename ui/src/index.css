@@ -1,0 +1,275 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* Import plugin-sdk theme.css as Single Source of Truth for CSS variables */
+@import './plugin-sdk/theme.css';
+/* Map dark: variant to .moon-theme class so it follows the app theme toggle */
+@custom-variant dark (&:where(.moon-theme, .moon-theme *));
+/* ═══════════════════════════════════════════════════════════════
+   TAILWIND V4 THEME CONFIGURATION
+The --color-* values below are DEFAULTS used at compile time by Tailwind v4 to generate utility classes (bg-surface, text-primary,
+  etc). At runtime they are overridden by :root.moon-theme and :root.sun-theme defined in ui/src/plugin-sdk/theme.css. If you need to add a new theme-dependent color: 1. Add the default here (so the utility class exists),
+2. Then add both --color-X and --axons-X in theme.css under BOTH :root.moon-theme and :root.sun-theme blocks. Do NOT create another .sun-theme {}
+
+block in this file — that's
+ how the old host/plugin color drift bug crept back in.
+     ═══════════════════════════════════════════════════════════════ */
+@theme {
+  /* Backgrounds */
+  --color-void: #06060a;
+  --color-deep: #0a0a12;
+    --color-surface: #0f0f1a;
+    --color-elevated: #1a1a2e;
+    --color-hover: #24243a;
+
+  /* Borders */
+  --color-border-subtle: #2a2a42;
+    --color-border-default: #3a3a56;
+
+  /* Text */
+  --color-text-primary: #e4e4ed;
+  --color-text-secondary: #8888a0;
+  --color-text-muted: #5a5a70;
+
+  /* Accent */
+  --color-accent: #7c3aed;
+  --color-accent-dim: #5b21b6;
+
+  /* Node colors */
+  --color-node-file: #3b82f6;
+  --color-node-folder: #6366f1;
+  --color-node-class: #f59e0b;
+  --color-node-function: #10b981;
+  --color-node-interface: #ec4899;
+  --color-node-import: #6b7280;
+  --color-node-method: #14b8a6;
+
+  /* Fonts */
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Animations */
+  --animate-breathe: breathe 3s ease-in-out infinite;
+  --animate-pulse-glow: pulse-glow 2s ease-in-out infinite;
+  --animate-slide-in: slide-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --animate-slide-up: slide-up 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --animate-menu-in: menu-in 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-fade-in: fade-in 0.3s ease-out;
+  --animate-embed-pulse: embed-pulse 1.5s ease-in-out infinite;
+    --animate-embed-success: embed-success 0.5s ease-out;
+    --animate-embed-error: embed-error 0.5s ease-out;
+
+  /* Box shadows */
+  --shadow-glow: 0 0 20px rgba(124, 58, 237, 0.4);
+  --shadow-glow-soft: 0 0 40px rgba(124, 58, 237, 0.15);
+  --shadow-desktop-menu: 0 4px 16px rgba(0, 0, 0, 0.24), 0 1px 4px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SYNTAX HIGHLIGHTER (react-syntax-highlighter)
+     ═══════════════════════════════════════════════════════════════ */
+/* Remove default backgrounds from syntax highlighter */
+pre[class*="language-"],
+code[class*="language-"] {
+  background: transparent !important;
+}
+
+/* Remove line number backgrounds */
+.linenumbers {
+  background: transparent !important;
+}
+
+/* Ensure code blocks have no extra backgrounds */
+pre > code {
+  background: transparent !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+                                                                                                                                                                                                                                                                 PROSE OVERRIDES FOR MARKDOWN RENDERING @tailwindcss/typography provides base prose styles;
+                                                                                                                                                                                                                                                                 these overrides adapt colors to our theme variables. ═══════════════════════════════════════════════════════════════ */
+
+/* Moon theme (dark) prose overrides */
+.moon-theme .prose {
+  --tw-prose-invert-body: var(--color-text-primary);
+  --tw-prose-invert-headings: var(--color-text-primary);
+  --tw-prose-invert-links: var(--color-accent);
+  --tw-prose-invert-bold: var(--color-text-primary);
+  --tw-prose-invert-counters: var(--color-text-secondary);
+  --tw-prose-invert-bullets: var(--color-text-secondary);
+  --tw-prose-invert-hr: var(--color-border-default);
+  --tw-prose-invert-quotes: var(--color-text-secondary);
+  --tw-prose-invert-quote-borders: var(--color-accent);
+  --tw-prose-invert-captions: var(--color-text-muted);
+  --tw-prose-invert-code: #f472b6;
+  --tw-prose-invert-pre-code: var(--color-text-primary);
+  --tw-prose-invert-pre-bg: var(--color-deep);
+  --tw-prose-invert-th-borders: var(--color-border-default);
+  --tw-prose-invert-td-borders: var(--color-border-subtle);
+}
+
+/* Fix: Tailwind preflight sets hr { height: 0 }, which hides prose hr.
+   Also explicitly set border-color since preflight resets border to "0 solid"
+   and the typography plugin's --tw-prose-invert-hr variable is not reliably
+   applied to border-color in Tailwind v4. */
+.prose hr {
+  height: auto;
+  border-top-width: 1px;
+  border-color: var(--color-border-default);
+}
+
+/* Add border-bottom to h1/h2 headings to match IDE markdown rendering style */
+.prose h1,
+.prose h2 {
+  border-bottom-width: 1px;
+  border-bottom-style: solid;
+  border-bottom-color: var(--color-border-default);
+  padding-bottom: 0.3em;
+}
+
+/* Increase code block font size from prose-sm default (~12px) to 13px */
+.prose pre,
+.prose code {
+  font-size: 0.8125rem;
+}
+
+/* Sun theme (light) prose overrides */
+.sun-theme .prose {
+  --tw-prose-invert-body: var(--color-text-primary);
+  --tw-prose-invert-headings: var(--color-text-primary);
+  --tw-prose-invert-links: var(--color-accent);
+  --tw-prose-invert-bold: var(--color-text-primary);
+  --tw-prose-invert-counters: var(--color-text-secondary);
+  --tw-prose-invert-bullets: var(--color-text-secondary);
+  --tw-prose-invert-hr: var(--color-border-default);
+  --tw-prose-invert-quotes: var(--color-text-secondary);
+  --tw-prose-invert-quote-borders: var(--color-accent);
+  --tw-prose-invert-captions: var(--color-text-muted);
+  --tw-prose-invert-code: #be1857;
+  --tw-prose-invert-pre-code: var(--color-text-primary);
+  --tw-prose-invert-pre-bg: var(--color-elevated);
+  --tw-prose-invert-th-borders: var(--color-border-default);
+  --tw-prose-invert-td-borders: var(--color-border-subtle);
+}
+/* ═══════════════════════════════════════════════════════════════
+         THEME COLORS — moved to ui/src/plugin-sdk/theme.css (Single Source of Truth shared by host UI and plugin iframes. Both :root.moon-theme and :root.sun-theme are defined there,
+           each writing the --color-* and --axons-* namespaces in lockstep.) ═══════════════════════════════════════════════════════════════ */
+/* Sun theme user message bubble: force white text */
+/* prose-invert sets --tw-prose-invert-body to --color-text-primary (#1e293b in sun theme), */
+/* which overrides the parent's text-white inheritance */
+.sun-theme .user-msg-bubble {
+  color: #ffffff !important;
+}
+
+.sun-theme .user-msg-bubble .prose {
+  --tw-prose-invert-body: #ffffff;
+  --tw-prose-invert-headings: #ffffff;
+  --tw-prose-invert-bold: #ffffff;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PANEL RESIZE — disable iframe pointer events while dragging a
+   resize handle so document-level mousemove keeps firing.
+   Added via document.body.classList in App.tsx / IframePluginPanel.
+   ═══════════════════════════════════════════════════════════════ */
+body.axons-resizing iframe {
+  pointer-events: none;
+}
+/* ═══════════════════════════════════════════════════════════════
+   EMBED ANIMATIONS
+     ═══════════════════════════════════════════════════════════════ */
+
+/* Desktop-style menu appear animation (IDE / macOS feel) */
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-2px);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+/* Breathing pulse effect for embedding icon with glow */
+@keyframes embed-pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: drop-shadow(0 0 4px rgba(124, 58, 237, 0.6));
+  }
+
+  50% {
+    opacity: 0.7;
+    transform: scale(0.9);
+    filter: drop-shadow(0 0 8px rgba(124, 58, 237, 0.9));
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   XTERM TERMINAL FIXES
+    ═══════════════════════════════════════════════════════════════ */
+/* Use thin scrollbar style for xterm viewport */
+.xterm-viewport {
+  scrollbar-width: thin;
+}
+/* Prevent grey strip at bottom of terminal during resize/drag */
+.xterm-container .xterm {
+  height: 100%;
+}
+
+.xterm-container .xterm-viewport {
+  /* xterm.css sets background-color: #000 which shows as a strip
+     in light theme. Make transparent so .xterm's theme bg shows through. */
+  background-color: transparent !important;
+  overflow-y: auto !important;
+}
+
+.xterm-container .xterm-screen {
+  height: 100% !important;
+}
+/* Success animation */
+@keyframes embed-success {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+
+  50% {
+    transform: scale(1.1);
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Error shake animation */
+@keyframes embed-error {
+
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  10%,
+  30%,
+  50%,
+  70%,
+  90% {
+    transform: translateX(-2px);
+  }
+
+  20%,
+  40%,
+  60%,
+  80% {
+    transform: translateX(2px);
+  }
+}
+/* Prism code editor container */
+.prism-editor-wrapper .prism-code-editor {
+  height: 100%;
+}
