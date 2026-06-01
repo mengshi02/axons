@@ -41,10 +41,13 @@ tasks:
 
   package:
     summary: Packages a production build of the application into a `.app` bundle
+    vars:
+      ARCH: '{{.ARCH | default ""}}'
     deps:
       - task: build
         vars:
           PRODUCTION: "true"
+          ARCH: '{{.ARCH}}'
       - task: common:generate:icons
     cmds:
       - task: create:app:bundle

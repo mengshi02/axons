@@ -7,9 +7,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BIN_DIR="$PROJECT_DIR/bin"
 APP_NAME="Axons"
+ARCH_SUFFIX="${ARCH_SUFFIX:-}"
 SOURCE_APP="$BIN_DIR/$APP_NAME.app"
-OUTPUT_DMG="$BIN_DIR/$APP_NAME.dmg"
-TMP_DIR="/tmp/$APP_NAME-dmg-$$"
+if [ -n "$ARCH_SUFFIX" ]; then
+    OUTPUT_DMG="$BIN_DIR/$APP_NAME-${ARCH_SUFFIX}.dmg"
+else
+    OUTPUT_DMG="$BIN_DIR/$APP_NAME.dmg"
+fi
+TMP_DIR="/tmp/$APP_NAME-dmg-$"
 
 echo "Creating DMG with install interface..."
 

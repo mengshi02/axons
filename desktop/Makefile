@@ -10,7 +10,7 @@ VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 # Wails v3 command
 WAILS?=$(shell which wails3 2>/dev/null || echo "$(HOME)/go/bin/wails3")
 
-.PHONY: all dev build build-mac build-mac-arm64 build-mac-amd64 build-mac-dmg build-linux build-linux-appimage build-windows build-windows-installer clean help
+.PHONY: all dev build build-mac build-mac-arm64 build-mac-amd64 build-mac-dmg build-mac-intel-dmg build-linux build-linux-appimage build-windows build-windows-installer clean help
 
 # Default target
 all: build
@@ -44,11 +44,17 @@ build-mac-amd64:
 	GOARCH=amd64 $(WAILS) build
 	@echo "Build complete."
 
-## build-mac-dmg: Build macOS DMG installer
+## build-mac-dmg: Build macOS DMG installer (current architecture)
 build-mac-dmg:
 	@echo "Packaging macOS app and creating DMG..."
 	$(WAILS) task package
 	./build/create-dmg.sh
+
+## build-mac-intel-dmg: Build macOS DMG installer for Intel (AMD64)
+build-mac-intel-dmg:
+	@echo "Packaging macOS Intel app and creating DMG..."
+	ARCH=amd64 $(WAILS) task darwin:package
+	ARCH_SUFFIX=intel ./build/create-dmg.sh
 
 ## build-windows: Build for Windows
 build-windows:

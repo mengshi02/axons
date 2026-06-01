@@ -43,43 +43,43 @@ build: frontend-build
 build-linux-amd64: frontend-build
 	@echo "Building $(BINARY_NAME) for linux/amd64..."
 	@mkdir -p $(DIST_DIR)
-	GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/axons
-	@echo "Built: $(DIST_DIR)/$(BINARY_NAME)-linux-amd64"
+	GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-web-linux-amd64.bin ./cmd/axons
+	@echo "Built: $(DIST_DIR)/$(BINARY_NAME)-web-linux-amd64.bin"
 
 ## build-linux-arm64: Build for Linux ARM64
 build-linux-arm64: frontend-build
 	@echo "Building $(BINARY_NAME) for linux/arm64..."
 	@mkdir -p $(DIST_DIR)
-	GOOS=linux GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/axons
-	@echo "Built: $(DIST_DIR)/$(BINARY_NAME)-linux-arm64"
+	GOOS=linux GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-web-linux-arm64.bin ./cmd/axons
+	@echo "Built: $(DIST_DIR)/$(BINARY_NAME)-web-linux-arm64.bin"
 
 ## build-darwin-amd64: Build for macOS AMD64
 build-darwin-amd64: frontend-build
 	@echo "Building $(BINARY_NAME) for darwin/amd64..."
 	@mkdir -p $(DIST_DIR)
-	GOOS=darwin GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/axons
-	@echo "Built: $(DIST_DIR)/$(BINARY_NAME)-darwin-amd64"
+	GOOS=darwin GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-web-darwin-amd64.bin ./cmd/axons
+	@echo "Built: $(DIST_DIR)/$(BINARY_NAME)-web-darwin-amd64.bin"
 
 ## build-darwin-arm64: Build for macOS ARM64 (Apple Silicon)
 build-darwin-arm64: frontend-build
 	@echo "Building $(BINARY_NAME) for darwin/arm64..."
 	@mkdir -p $(DIST_DIR)
-	GOOS=darwin GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/axons
-	@echo "Built: $(DIST_DIR)/$(BINARY_NAME)-darwin-arm64"
+	GOOS=darwin GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-web-darwin-arm64.bin ./cmd/axons
+	@echo "Built: $(DIST_DIR)/$(BINARY_NAME)-web-darwin-arm64.bin"
 
 ## build-windows-amd64: Build for Windows AMD64
 build-windows-amd64: frontend-build
 	@echo "Building $(BINARY_NAME) for windows/amd64..."
 	@mkdir -p $(DIST_DIR)
-	GOOS=windows GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-windows-amd64.exe ./cmd/axons
-	@echo "Built: $(DIST_DIR)/$(BINARY_NAME)-windows-amd64.exe"
+	GOOS=windows GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-web-windows-amd64.exe ./cmd/axons
+	@echo "Built: $(DIST_DIR)/$(BINARY_NAME)-web-windows-amd64.exe"
 
 ## build-windows-arm64: Build for Windows ARM64
 build-windows-arm64: frontend-build
 	@echo "Building $(BINARY_NAME) for windows/arm64..."
 	@mkdir -p $(DIST_DIR)
-	GOOS=windows GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-windows-arm64.exe ./cmd/axons
-	@echo "Built: $(DIST_DIR)/$(BINARY_NAME)-windows-arm64.exe"
+	GOOS=windows GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-web-windows-arm64.exe ./cmd/axons
+	@echo "Built: $(DIST_DIR)/$(BINARY_NAME)-web-windows-arm64.exe"
 
 ## build-all: Build for all platforms and architectures
 build-all: frontend-build build-linux-amd64 build-linux-arm64 build-darwin-amd64 build-darwin-arm64 build-windows-amd64 build-windows-arm64
@@ -100,12 +100,12 @@ build-windows: build-windows-amd64 build-windows-arm64
 ## dist: Create distribution archives for all platforms
 dist: build-all
 	@echo "Creating distribution archives..."
-	cd $(DIST_DIR) && tar -czvf $(BINARY_NAME)-linux-amd64.tar.gz $(BINARY_NAME)-linux-amd64
-	cd $(DIST_DIR) && tar -czvf $(BINARY_NAME)-linux-arm64.tar.gz $(BINARY_NAME)-linux-arm64
-	cd $(DIST_DIR) && tar -czvf $(BINARY_NAME)-darwin-amd64.tar.gz $(BINARY_NAME)-darwin-amd64
-	cd $(DIST_DIR) && tar -czvf $(BINARY_NAME)-darwin-arm64.tar.gz $(BINARY_NAME)-darwin-arm64
-	cd $(DIST_DIR) && zip -q $(BINARY_NAME)-windows-amd64.zip $(BINARY_NAME)-windows-amd64.exe
-	cd $(DIST_DIR) && zip -q $(BINARY_NAME)-windows-arm64.zip $(BINARY_NAME)-windows-arm64.exe
+	cd $(DIST_DIR) && tar -czvf $(BINARY_NAME)-web-linux-amd64.tar.gz $(BINARY_NAME)-web-linux-amd64.bin
+	cd $(DIST_DIR) && tar -czvf $(BINARY_NAME)-web-linux-arm64.tar.gz $(BINARY_NAME)-web-linux-arm64.bin
+	cd $(DIST_DIR) && tar -czvf $(BINARY_NAME)-web-darwin-amd64.tar.gz $(BINARY_NAME)-web-darwin-amd64.bin
+	cd $(DIST_DIR) && tar -czvf $(BINARY_NAME)-web-darwin-arm64.tar.gz $(BINARY_NAME)-web-darwin-arm64.bin
+	cd $(DIST_DIR) && zip -q $(BINARY_NAME)-web-windows-amd64.zip $(BINARY_NAME)-web-windows-amd64.exe
+	cd $(DIST_DIR) && zip -q $(BINARY_NAME)-web-windows-arm64.zip $(BINARY_NAME)-web-windows-arm64.exe
 	@echo "Distribution archives created in $(DIST_DIR)/"
 
 ## clean-dist: Clean distribution directory
