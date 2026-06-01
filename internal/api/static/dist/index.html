@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Axons - AI-Powered Code Knowledge Graph</title>
+  <!-- Plugin SDK CSS: globally loaded so plugins can use axons theme variables -->
+  <link rel="stylesheet" href="/plugin-sdk/theme.css" />
+  <link rel="stylesheet" href="/plugin-sdk/components.css" />
+  <!-- Import map: resolve bare module specifiers for dynamically-loaded plugins -->
+  <!-- Shims re-export from window globals set by main.tsx (React, ReactDOM, AxonsPluginUI) -->
+  <!-- This ensures host and plugins share the same instances — no CDN needed -->
+
+  <script type="importmap">
+      {
+        "imports": {
+          "react": "/vendor/react.js",
+          "react-dom": "/vendor/react-dom.js",
+          "react/jsx-runtime": "/vendor/react-jsx-runtime.js",
+          "axons-plugin-ui": "/vendor/axons-plugin-ui.js"
+        }
+      }
+    </script>
+  <script type="module" crossorigin src="/assets/index-DqByFSSS.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-Bc58uXeN.css">
+</head>
+
+<body>
+  <div id="root"></div>
+</body>
+
+</html>

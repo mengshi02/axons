@@ -1,0 +1,119 @@
+//#region src/plugin-sdk/iframe-adapter.ts
+var e = class e {
+	static PROTOCOL_VERSION = 1;
+	hostOrigin = null;
+	_pluginId = "";
+	eventSource = null;
+	eventHandlers = /* @__PURE__ */ new Map();
+	constructor() {
+		window.addEventListener("message", this.handleMessage);
+	}
+	isFromHost(e) {
+		return this.hostOrigin ? e.origin === this.hostOrigin : !0;
+	}
+	init() {
+		return new Promise((t) => {
+			let n = (r) => {
+				let i = r.data;
+				if (!(i?.protocol !== "axons-plugin-iframe" || i.version !== e.PROTOCOL_VERSION) && i.type === "plugin:init") {
+					if (this.hostOrigin = r.origin, this._pluginId = i.payload.pluginId, i.payload.theme) {
+						let e = document.documentElement;
+						e.classList.remove("moon-theme", "sun-theme"), e.classList.add(i.payload.theme === "moon" ? "moon-theme" : "sun-theme");
+					}
+					window.removeEventListener("message", n), this.send({ type: "plugin:ready" }), t({ pluginId: this._pluginId });
+				}
+			};
+			window.addEventListener("message", n);
+		});
+	}
+	get pluginId() {
+		return this._pluginId;
+	}
+	get endpoint() {
+		let e = window.__AXONS_PLUGIN__;
+		return e?.endpoint ? e.endpoint : null;
+	}
+	async fetch(e, t) {
+		return globalThis.fetch(this.resolveUrl(e), t);
+	}
+	createEventSource(e) {
+		return new EventSource(this.resolveUrl(e));
+	}
+	async getState(e) {
+		let t = await globalThis.fetch(`/v1/plugins/state/${this.pluginId}:${e}`);
+		return t.ok ? (await t.json()).value : null;
+	}
+	async setState(e, t) {
+		await globalThis.fetch(`/v1/plugins/state/${this.pluginId}:${e}`, {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(t)
+		});
+	}
+	onEvent(e, t) {
+		return this.eventHandlers.has(e) || this.eventHandlers.set(e, /* @__PURE__ */ new Set()), this.eventHandlers.get(e).add(t), this.eventSource || this.connectSSE(), () => {
+			this.eventHandlers.get(e)?.delete(t);
+		};
+	}
+	async emitEvent(e, t) {
+		await globalThis.fetch("/v1/plugins/event", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				pluginId: this.pluginId,
+				type: e,
+				payload: t
+			})
+		});
+	}
+	onClose() {
+		this.send({ type: "plugin:close" });
+	}
+	destroy() {
+		this.eventSource &&= (this.eventSource.close(), null), this.eventHandlers.clear(), window.removeEventListener("message", this.handleMessage);
+	}
+	resolveUrl(e) {
+		return window.__AXONS_PLUGIN__?.runtimeMode === "desktop" && window.__AXONS_PLUGIN__?.endpoint ? window.__AXONS_PLUGIN__.endpoint + e : `/v1/plugins/${this.pluginId}/proxy${e}`;
+	}
+	connectSSE() {
+		this.eventSource = new EventSource("/v1/plugins/events/stream"), this.eventSource.onmessage = (e) => {
+			try {
+				let t = JSON.parse(e.data), n = this.eventHandlers.get(t.type);
+				n && n.forEach((e) => {
+					try {
+						e(t.payload);
+					} catch (e) {
+						console.error("[Plugin] Event handler error:", e);
+					}
+				});
+			} catch (e) {
+				console.error("[Plugin] SSE parse error:", e);
+			}
+		};
+	}
+	handleMessage = (t) => {
+		if (!this.isFromHost(t)) return;
+		let n = t.data;
+		if (!(n?.protocol !== "axons-plugin-iframe" || n.source !== "host") && n.version === e.PROTOCOL_VERSION) switch (n.type) {
+			case "plugin:theme": {
+				let e = document.documentElement;
+				e.classList.remove("moon-theme", "sun-theme"), e.classList.add(n.payload.theme === "moon" ? "moon-theme" : "sun-theme");
+				break;
+			}
+			case "host:click":
+				document.dispatchEvent(new MouseEvent("mousedown", { bubbles: !0 }));
+				break;
+		}
+	};
+	send(t) {
+		window.parent.postMessage({
+			protocol: "axons-plugin-iframe",
+			version: e.PROTOCOL_VERSION,
+			source: "plugin",
+			pluginId: this.pluginId,
+			...t
+		}, "*");
+	}
+};
+//#endregion
+export { e as IframePluginApiAdapter };
