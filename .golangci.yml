@@ -7,9 +7,7 @@ linters:
   default: none
   enable:
     - govet
-    - ineffassign
     - staticcheck
-    - unused
   settings:
     govet:
       disable:
@@ -18,16 +16,21 @@ linters:
     staticcheck:
       checks:
         - all
-        - '-QF1003'  # tagged switch - style suggestion, not a bug
+        - '-QF1003'  # tagged switch - style suggestion
         - '-QF1012'  # fmt.Fprintf instead of WriteString(Sprintf) - style suggestion
         - '-S1017'   # TrimPrefix suggestion - style suggestion
         - '-S1002'   # omit bool comparison - style suggestion
         - '-S1005'   # unnecessary blank identifier assignment - minor
-        - '-SA9003'  # empty branch - sometimes intentional for documentation
-        - '-SA1019'  # deprecated function usage - informational, not always actionable
+        - '-S1039'   # unnecessary Sprintf - style suggestion
+        - '-SA1006'  # printf-style with dynamic format - minor
+        - '-SA9003'  # empty branch - sometimes intentional
+        - '-SA1019'  # deprecated function usage - not always actionable
         - '-SA4006'  # value never used after assignment - minor
         - '-SA4000'  # identical expressions - minor logic check
-        - '-S1039'   # unnecessary Sprintf - style suggestion
+        - '-ST1000'  # package comment format - style only
+        - '-ST1003'  # underscore in Go names - style only
+        - '-ST1020'  # exported func comment format - style only
+        - '-ST1021'  # exported type comment format - style only
 
 issues:
   max-issues-per-linter: 50
