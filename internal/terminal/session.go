@@ -112,7 +112,7 @@ func NewSession(id, cwd, shell string, cols, rows uint16) (*Session, error) {
 		if strings.Contains(detail, "device not configured") || strings.Contains(detail, "ENXIO") {
 			userMsg = "Terminal device unavailable — system PTY resources exhausted. Try closing other terminal applications (e.g. VS Code terminals) and retry."
 		}
-		return nil, fmt.Errorf(userMsg)
+		return nil, errors.New(userMsg)
 	}
 
 	// Set initial size with validation
