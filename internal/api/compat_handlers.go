@@ -3,6 +3,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -1084,6 +1085,21 @@ func (s *Server) resolveFilePath(filePath string, projectID string) string {
 	return absPath
 }
 
+// imageExtensions maps file extensions to MIME types for image preview.
+var imageExtensions = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".bmp":  "image/bmp",
+	".webp": "image/webp",
+	".svg":  "image/svg+xml",
+	".ico":  "image/x-icon",
+	".tiff": "image/tiff",
+	".tif":  "image/tiff",
+	".avif": "image/avif",
+}
+
 // handleFileGet handles GET requests to read file content
 func (s *Server) handleFileGet(w http.ResponseWriter, absPath string) {
 	content, err := os.ReadFile(absPath)
@@ -1093,6 +1109,21 @@ func (s *Server) handleFileGet(w http.ResponseWriter, absPath string) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", fmt.Sprintf("Failed to read file: %v", err))
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(absPath))
+	if mimeType, ok := imageExtensions[ext]; ok {
+		// Image file: return base64-encoded content with MIME type so
+		// the frontend can render it via a data URL instead of showing
+		// garbled binary text.
+		encoded := base64.StdEncoding.EncodeToString(content)
+		writeJSON(w, http.StatusOK, map[string]string{
+			"content":  encoded,
+			"path":     absPath,
+			"mimeType": mimeType,
+			"isBinary": "true",
+		})
 		return
 	}
 

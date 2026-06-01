@@ -4,6 +4,7 @@ import {
   FileCode, File, FileJson, FileText, Braces, Settings,
   FilePlus, FolderPlus, ChevronsUpDown, RefreshCw,
   Copy, Scissors, Clipboard, Trash2, Pencil, Terminal,
+  Image,
 } from 'lucide-react';
 import { useAppState } from '../hooks/useAppState';
 import type { PanelComponentProps } from '../lib/panelRegistry';
@@ -34,6 +35,8 @@ function getFileIcon(name: string) {
       return <Braces className="w-4 h-4 text-node-interface flex-shrink-0" />;
     case 'yaml': case 'yml': case 'toml':
       return <Settings className="w-4 h-4 text-text-muted flex-shrink-0" />;
+    case 'png': case 'jpg': case 'jpeg': case 'gif': case 'bmp': case 'webp': case 'svg': case 'ico': case 'tiff': case 'tif': case 'avif':
+      return <Image className="w-4 h-4 text-node-variable flex-shrink-0" />;
     default:
       return <File className="w-4 h-4 text-text-muted flex-shrink-0" />;
   }
