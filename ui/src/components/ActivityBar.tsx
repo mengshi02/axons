@@ -146,30 +146,21 @@ export function ActivityBar(_props: ActivityBarProps) {
                         <Settings className="w-5 h-5" />
                     </button>
 
-                    {/* Gear dropdown menu — desktop-style */}
+                    {/* Gear dropdown menu — IDE style, neutral-gray independent of UI theme surface */}
                     {isGearMenuOpen && (
-                        <div className="absolute left-11 bottom-0 z-50 desktop-menu overflow-hidden bg-elevated/80 backdrop-blur-xl border border-border-default/60 rounded-lg shadow-desktop-menu py-1.5 min-w-[180px] text-[13px] animate-menu-in">
-                            {/* 上方：扩展 */}
+                        <div className="absolute left-11 bottom-0 z-50 bg-menu-bg border border-menu-border text-menu-fg rounded shadow-desktop-menu py-1 min-w-[200px] text-[13px] animate-menu-in">
                             <button
                                 onClick={() => { openPanel('extensions'); setIsGearMenuOpen(false); }}
-                                className="w-full text-left flex items-center justify-between gap-2.5 px-3 py-[6px] rounded-md mx-1 transition-all duration-150 hover:bg-accent/8 cursor-pointer"
+                                className="w-full text-left px-3 py-[5px] transition-colors duration-75 hover:bg-menu-hover-bg hover:text-menu-hover-fg cursor-pointer"
                             >
-                                <span className="flex items-center gap-2.5">
-                                    <Puzzle className="w-4 h-4 text-text-secondary" />
-                                    <span className="text-text-primary">Extensions</span>
-                                </span>
+                                Extensions
                             </button>
-                            {/* 分隔线 */}
-                            <div className="mx-2 my-1.5 h-px bg-border-default/70" />
-                            {/* 下方：设置 */}
+                            <div className="my-1 h-px bg-menu-separator" />
                             <button
                                 onClick={() => { openPanel('settings'); setIsGearMenuOpen(false); }}
-                                className="w-full text-left flex items-center justify-between gap-2.5 px-3 py-[6px] rounded-md mx-1 transition-all duration-150 hover:bg-accent/8 cursor-pointer"
+                                className="w-full text-left px-3 py-[5px] transition-colors duration-75 hover:bg-menu-hover-bg hover:text-menu-hover-fg cursor-pointer"
                             >
-                                <span className="flex items-center gap-2.5">
-                                    <Settings className="w-4 h-4 text-text-secondary" />
-                                    <span className="text-text-primary">Settings</span>
-                                </span>
+                                Settings
                             </button>
                         </div>
                     )}

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useIframePointerEvents } from '../hooks/useIframePointerEvents';
 
 export interface ContextMenuItem {
@@ -47,35 +47,75 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     };
   }, [onClose]);
 
-  // Adjust position to avoid going off screen
-  const menuStyle: React.CSSProperties = {
+  // Clamp menu position so it never overflows the viewport.
+  // Start hidden (opacity-0) at the raw click position, measure the rendered
+  // size via useLayoutEffect, then flip/shift as needed before making it
+  // visible.  This avoids a visible jump — the menu is sized and placed in
+  // the same paint cycle as it becomes opaque.
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({
     position: 'fixed',
     left: x,
     top: y,
     zIndex: 9999,
-  };
+    opacity: 0,        // hidden until position is clamped
+    pointerEvents: 'none',
+  });
+
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+
+    const { width, height } = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const margin = 8; // minimum gap from viewport edge
+
+    let left = x;
+    let top = y;
+
+    // Horizontal: flip left if menu overflows right edge
+    if (left + width + margin > vw) {
+      left = Math.max(margin, vw - width - margin);
+    }
+    if (left < margin) left = margin;
+
+    // Vertical: flip upward if menu overflows bottom edge
+    if (top + height + margin > vh) {
+      top = Math.max(margin, vh - height - margin);
+    }
+    if (top < margin) top = margin;
+
+    setMenuStyle({
+      position: 'fixed',
+      left,
+      top,
+      zIndex: 9999,
+      opacity: 1,
+      pointerEvents: 'auto',
+    });
+  }, [x, y, items]);
 
   return (
     <div
       ref={menuRef}
       style={menuStyle}
-      className="desktop-menu overflow-hidden bg-elevated/80 backdrop-blur-xl border border-border-default/60 rounded-lg shadow-desktop-menu py-1.5 min-w-[200px] text-[13px] animate-menu-in"
+      className="bg-menu-bg border border-menu-border text-menu-fg rounded shadow-desktop-menu py-1 min-w-[220px] text-[13px] animate-menu-in"
     >
       {items.map((item, i) => {
         if ('separator' in item && item.separator) {
-          return <div key={i} className="mx-2 my-1.5 h-px bg-border-default/70" />;
+          return <div key={i} className="my-1 h-px bg-menu-separator" />;
         }
         const menuItem = item as ContextMenuItem;
         return (
           <button
             key={i}
             disabled={menuItem.disabled}
-            className={`w-full text-left flex items-center justify-between gap-4 px-3 py-[6px] rounded-md mx-1 transition-all duration-150
+            className={`w-full text-left flex items-center justify-between gap-6 px-3 py-[5px] transition-colors duration-75
               ${menuItem.disabled
                 ? 'opacity-40 cursor-not-allowed'
                 : menuItem.danger
-                  ? 'text-red-400 hover:bg-red-500/10 cursor-pointer'
-                : 'text-text-primary cursor-pointer hover:bg-accent/8'
+                  ? 'cursor-pointer hover:bg-menu-danger-hover-bg hover:text-menu-hover-fg'
+                  : 'cursor-pointer hover:bg-menu-hover-bg hover:text-menu-hover-fg'
               }`}
             onClick={() => {
               if (!menuItem.disabled) {
@@ -84,12 +124,14 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
               }
             }}
           >
-            <span className="flex items-center gap-2.5">
-              {menuItem.icon && <span className="w-4 h-4 flex items-center justify-center text-text-secondary">{menuItem.icon}</span>}
-              <span className={menuItem.disabled ? '' : 'text-text-primary'}>{menuItem.label}</span>
+            <span className="flex items-center gap-2.5 min-w-0">
+              {menuItem.icon
+                ? <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center opacity-70">{menuItem.icon}</span>
+                : <span className="w-4 h-4 flex-shrink-0" />}
+              <span className="truncate">{menuItem.label}</span>
             </span>
             {menuItem.shortcut && (
-              <span className="text-[11px] text-text-muted/70 tracking-wide ml-auto">{menuItem.shortcut}</span>
+              <span className="text-[11px] opacity-50 tracking-wide flex-shrink-0">{menuItem.shortcut}</span>
             )}
           </button>
         );

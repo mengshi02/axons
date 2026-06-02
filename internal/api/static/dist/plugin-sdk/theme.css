@@ -53,6 +53,16 @@
   --axons-shadow-soft: 0 0 40px rgba(124, 58, 237, 0.15);
   --shadow-desktop-menu: 0 8px 30px rgba(0, 0, 0, 0.36), 0 2px 8px rgba(0, 0, 0, 0.16), 0 0 0 1px rgba(255, 255, 255, 0.06);
 
+  /* Menu — neutral-gray palette independent of the purple UI surface,
+     matching IDE's menu.background / menu.selectionBackground tokens */
+  --color-menu-bg: #2d2d2d;
+  --color-menu-border: #454545;
+  --color-menu-hover-bg: #094771;
+  --color-menu-hover-fg: #ffffff;
+  --color-menu-separator: #454545;
+  --color-menu-fg: #cccccc;
+  --color-menu-danger-hover-bg: #c42b1c;
+
   /* Plugin-only tokens (fonts/radii). Host UI uses Tailwind utilities for these
      and reads them from @theme {} in index.css, so no --color-* mirror is needed. */
   --axons-font-sans: 'Inter', system-ui, sans-serif;
@@ -112,6 +122,15 @@
   --axons-shadow-soft: 0 0 40px rgba(245, 158, 11, 0.1);
   --shadow-desktop-menu: 0 8px 30px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.06);
 
+  /* Menu — neutral-gray palette independent of the light UI surface */
+  --color-menu-bg: #f0f0f0;
+  --color-menu-border: #d4d4d4;
+  --color-menu-hover-bg: #0060c0;
+  --color-menu-hover-fg: #ffffff;
+  --color-menu-separator: #d4d4d4;
+  --color-menu-fg: #1e1e1e;
+  --color-menu-danger-hover-bg: #c42b1c;
+
   /* Plugin-only tokens */
   --axons-font-sans: 'Inter', system-ui, sans-serif;
   --axons-font-mono: 'JetBrains Mono', 'Fira Code', monospace;
@@ -148,5 +167,12 @@
   --axons-radius-sm: 4px;
   --axons-radius-md: 6px;
   --axons-radius-lg: 8px;
+  --color-menu-bg: #2d2d2d;
+  --color-menu-border: #454545;
+  --color-menu-hover-bg: #094771;
+  --color-menu-hover-fg: #ffffff;
+  --color-menu-separator: #454545;
+  --color-menu-fg: #cccccc;
+  --color-menu-danger-hover-bg: #c42b1c;
   --axons-select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16'%3E%3Cpath d='M4.5 6l3.5 4 3.5-4z' fill='%238888a0'/%3E%3C/svg%3E");
 }

@@ -157,6 +157,15 @@ function isDescendantOrSelf(srcPath: string, targetPath: string): boolean {
   return target === srcPath || target.startsWith(src);
 }
 
+/** Sentinel array representing an unloaded directory's children.
+ *  Using a stable module-level reference allows mergeChildrenAtPath to
+ *  distinguish "no children loaded yet" (=== UNLOADED) from "children were
+ *  fetched and the directory is genuinely empty" (!== UNLOADED, length === 0).
+ *  This fixes the case where expanding an empty directory left it blank
+ *  because the length-based check mistakenly treated an empty fetch result
+ *  as "target not found". */
+const UNLOADED_SENTINEL: FileTreeEntry[] = [];
+
 /** Merge fetched children into the entry at the given directory path.
  *  Immutable — returns a new array. Used for lazy loading.
  *
@@ -168,11 +177,10 @@ function isDescendantOrSelf(srcPath: string, targetPath: string): boolean {
  *  fail for deep paths — the user would see an expanded-but-empty dir.
  *
  *  When a directory's children haven't been loaded yet (`children` is
- *  undefined), we treat it as an empty array for recursion purposes
- *  but only propagate the change upward if the recursive call actually
- *  found and merged the target — otherwise we leave the entry unchanged
- *  (preserving `children: undefined` so the lazy-load logic knows the
- *  directory still needs to be fetched).
+ *  undefined), we use the UNLOADED_SENTINEL as the recursion base so we
+ *  can distinguish "target not found inside an unloaded dir" (sentinel
+ *  reference is returned unchanged) from "target IS the dir and it's
+ *  genuinely empty" (a new [] is returned for the matching node).
  */
 function mergeChildrenAtPath(entries: FileTreeEntry[], dirPath: string, children: FileTreeEntry[]): FileTreeEntry[] {
   if (dirPath === '.' || dirPath === '') {
@@ -184,20 +192,18 @@ function mergeChildrenAtPath(entries: FileTreeEntry[], dirPath: string, children
       return { ...e, children };
     }
     // Recurse into ANY directory, even if its children haven't been
-    // loaded yet (children === undefined).  We pass an empty array
-    // so the recursive call can still walk deeper levels, but we
-    // only propagate the change if the target was actually found.
+    // loaded yet (children === undefined).  We pass UNLOADED_SENTINEL
+    // instead of a fresh [] so the recursive call can detect whether
+    // the target was actually found:
+    //   - if updatedChildren === subEntries (same reference), nothing changed
+    //   - if subEntries === UNLOADED_SENTINEL and updatedChildren.length === 0,
+    //     the target was NOT inside this unloaded dir — don't replace undefined with []
+    //   - otherwise the target was found and merged — propagate upward
     if (e.is_dir) {
-      const subEntries = e.children ?? [];
+      const subEntries = e.children ?? UNLOADED_SENTINEL;
       const updatedChildren = mergeChildrenAtPath(subEntries, dirPath, children);
       if (updatedChildren !== subEntries) {
-        // The recursive call modified the array — propagate upward.
-        // If e.children was undefined and the target was NOT found,
-        // updatedChildren will be a different [] reference but with
-        // the same content (empty).  Detect this case to avoid
-        // replacing children:undefined with children:[] which would
-        // make the directory appear empty instead of "not yet loaded".
-        if (e.children === undefined && updatedChildren.length === 0) {
+        if (subEntries === UNLOADED_SENTINEL && updatedChildren.length === 0) {
           // Target was not found inside this unloaded directory —
           // don't replace undefined with []
           return e;
@@ -475,21 +481,28 @@ export function FileTreePanel({ onSelectNode: _onSelectNode }: PanelComponentPro
     setLoading(true);
     try {
       const result = await listFileTree(projectId, '.', false, true);
-      setEntries(result.entries);
       // Reset lazy-load cache on full refresh
       loadedDirsRef.current = new Set();
+      expandingRef.current = new Map();
 
       // Re-load children for all currently expanded directories so that
       // the expand state is preserved after a full tree refresh (e.g. undo/redo).
       // Without this, loadTree clears the entries but the expanded-paths remain,
-      // causing the dirs to appear expanded-but-empty (collapsed visually).
+      // causing the dirs to appear expanded-but-empty.
+      //
+      // RACE CONDITION FIX: do NOT call setEntries(result.entries) here before
+      // the async loop, then setEntries(currentEntries) at the end.  The two
+      // separate writes create a window where a concurrent toggleExpand can
+      // interleave a setEntries(prev => merge(prev,...)) that then races with
+      // the second write, corrupting the accumulated state.
+      // Solution: accumulate everything in a local variable and commit once.
       const expanded = expandedPathsRef.current;
+      let currentEntries = result.entries;
       if (expanded.size > 0) {
         const sortedPaths = [...expanded].sort(
           (a, b) => a.split('/').length - b.split('/').length,
         );
         const stalePaths: string[] = [];
-        let currentEntries = result.entries;
         for (const dirPath of sortedPaths) {
           try {
             const dirResult = await listFileTree(projectId, dirPath, false, true);
@@ -503,7 +516,6 @@ export function FileTreePanel({ onSelectNode: _onSelectNode }: PanelComponentPro
             }
           }
         }
-        setEntries(currentEntries);
         if (stalePaths.length > 0) {
           setFileTreeExpandedPaths((prev) => {
             const next = new Set(prev);
@@ -512,6 +524,8 @@ export function FileTreePanel({ onSelectNode: _onSelectNode }: PanelComponentPro
           });
         }
       }
+      // Single commit — no intermediate render with stale children
+      setEntries(currentEntries);
     } catch (e) {
       console.error('FileTree load error', e);
     } finally {
@@ -534,9 +548,18 @@ export function FileTreePanel({ onSelectNode: _onSelectNode }: PanelComponentPro
 
   const loadedDirsRef = useRef<Set<string>>(new Set());
 
-  // Reset loadedDirs when project changes
+  // In-flight expand requests — maps dirPath → Promise<void>.
+  // If the same directory is expanded again while a request is already in
+  // flight (e.g. fast double-click or slow network), the second call reuses
+  // the same Promise instead of issuing a second network request.  Without
+  // this, two concurrent listFileTree calls for the same path race and the
+  // second setEntries write can overwrite the first, leaving children empty.
+  const expandingRef = useRef<Map<string, Promise<void>>>(new Map());
+
+  // Reset loadedDirs and expandingRef when project changes
   useEffect(() => {
     loadedDirsRef.current = new Set();
+    expandingRef.current = new Map();
     // Don't reset restoredProjectIdRef here — the restore effect itself
     // checks restoredProjectIdRef against the current projectId,
     // so it naturally re-runs when the project changes.
@@ -585,16 +608,27 @@ export function FileTreePanel({ onSelectNode: _onSelectNode }: PanelComponentPro
     // directories are loaded before their children.  Without this,
     // `mergeChildrenAtPath` cannot find a deep target if the
     // intermediate directory's children haven't been loaded yet.
+    //
+    // RACE CONDITION FIX (in-memory serial merge):
+    //   The old code called setEntries(prev => merge(prev, ...)) inside each
+    //   loop iteration.  Because the loop is async, React may batch-schedule
+    //   those setEntries calls and the `prev` seen by iteration N+1 does NOT
+    //   yet include the changes from iteration N — so deep paths silently fail
+    //   to merge.  The fix: accumulate all merges into a local `current`
+    //   variable (same pattern already used in loadTree), then call setEntries
+    //   exactly once at the end.
     const loadExpandedDirs = async () => {
       const sortedPaths = [...fileTreeExpandedPaths].sort(
         (a, b) => a.split('/').length - b.split('/').length,
       );
       const stalePaths: string[] = [];
+      // Start from the current entries snapshot and merge in-memory
+      let current = entries;
       for (const path of sortedPaths) {
         if (!loadedDirsRef.current.has(path)) {
           try {
             const result = await listFileTree(projectId, path, false, true);
-            setEntries((prev) => mergeChildrenAtPath(prev, path, result.entries));
+            current = mergeChildrenAtPath(current, path, result.entries);
             loadedDirsRef.current.add(path);
           } catch (e: any) {
             if (e?.status === 404 || e?.code === 'NOT_FOUND') {
@@ -606,6 +640,8 @@ export function FileTreePanel({ onSelectNode: _onSelectNode }: PanelComponentPro
           }
         }
       }
+      // Single setEntries write — avoids the stale-prev race
+      setEntries(current);
       if (stalePaths.length > 0) {
         setFileTreeExpandedPaths((prev) => {
           const next = new Set(prev);
@@ -616,13 +652,12 @@ export function FileTreePanel({ onSelectNode: _onSelectNode }: PanelComponentPro
     };
 
     loadExpandedDirs();
-  }, [entries.length, fileTreeExpandedPaths, fileTreeExpandedPathsReady, projectId]);
+  }, [entries, fileTreeExpandedPaths, fileTreeExpandedPathsReady, projectId]);
 
   // ── Toggle expand (lazy: fetch children on first expand) ───────────────────
 
   const toggleExpand = useCallback(async (path: string) => {
-    const isExpanded = expandedPathsRef.current.has(path);
-    if (isExpanded) {
+    if (expandedPathsRef.current.has(path)) {
       // Collapse: just remove from fileTreeExpandedPaths
       setFileTreeExpandedPaths((prev) => {
         const next = new Set(prev);
@@ -632,27 +667,43 @@ export function FileTreePanel({ onSelectNode: _onSelectNode }: PanelComponentPro
       return;
     }
 
-    // Expand: check if children are already loaded
+    // Expand: fetch children on first visit (lazy loading).
+    // RACE CONDITION FIX (IDE-style Promise reuse):
+    //   If this directory is already being fetched (e.g. fast double-click or
+    //   slow network), reuse the existing Promise instead of issuing a second
+    //   network request.  Without this, two concurrent listFileTree calls
+    //   race: the second setEntries call uses a stale `prev` snapshot and
+    //   overwrites the first result, leaving the directory visually empty.
     if (!loadedDirsRef.current.has(path) && projectId) {
+      let p = expandingRef.current.get(path);
+      if (!p) {
+        p = listFileTree(projectId, path, false, true)
+          .then((result) => {
+            setEntries((prev) => mergeChildrenAtPath(prev, path, result.entries));
+            loadedDirsRef.current.add(path);
+          })
+          .catch((e: any) => {
+            if (e?.status === 404 || e?.code === 'NOT_FOUND') {
+              // Directory no longer exists — remove from expanded paths silently
+              setFileTreeExpandedPaths((prev) => {
+                const next = new Set(prev);
+                next.delete(path);
+                return next;
+              });
+              // Re-throw so the await below catches it and skips the expand
+              throw e;
+            }
+            console.error('FileTree lazy load error', e);
+            // Other errors: still expand (will show empty), swallow error
+          })
+          .finally(() => expandingRef.current.delete(path));
+        expandingRef.current.set(path, p);
+      }
       try {
-        const result = await listFileTree(projectId, path, false, true);
-        // Merge children into the entry at this path AND mark as expanded
-        // in a single batch to avoid a render where the dir is expanded
-        // but its children are still missing.
-        setEntries((prev) => mergeChildrenAtPath(prev, path, result.entries));
-        loadedDirsRef.current.add(path);
-      } catch (e: any) {
-        if (e?.status === 404 || e?.code === 'NOT_FOUND') {
-          // Directory no longer exists – remove from expanded paths silently
-          setFileTreeExpandedPaths((prev) => {
-            const next = new Set(prev);
-            next.delete(path);
-            return next;
-          });
-          return;
-        }
-        console.error('FileTree lazy load error', e);
-        // Still expand even if load failed (will show empty)
+        await p;
+      } catch {
+        // 404 path: directory gone, already cleaned up above — don't expand
+        return;
       }
     }
 
@@ -664,26 +715,33 @@ export function FileTreePanel({ onSelectNode: _onSelectNode }: PanelComponentPro
   }, [projectId, setFileTreeExpandedPaths]);
 
   /** Ensure a directory's children are loaded before expanding it.
-   *  Used by context menu and toolbar actions that force-expand a directory. */
+   *  Used by context menu and toolbar actions that force-expand a directory.
+   *  Reuses expandingRef so concurrent calls for the same path share one request. */
   const ensureDirLoaded = useCallback(async (path: string): Promise<void> => {
     if (loadedDirsRef.current.has(path) || !projectId) return;
-    try {
-      const result = await listFileTree(projectId, path, false, true);
-      setEntries((prev) => mergeChildrenAtPath(prev, path, result.entries));
-      loadedDirsRef.current.add(path);
-    } catch (e: any) {
-      if (e?.status === 404 || e?.code === 'NOT_FOUND') {
-        // Directory no longer exists – remove from expanded paths silently
-        setFileTreeExpandedPaths((prev) => {
-          const next = new Set(prev);
-          next.delete(path);
-          return next;
-        });
-        return;
-      }
-      console.error('FileTree ensureDirLoaded error', e);
+    let p = expandingRef.current.get(path);
+    if (!p) {
+      p = listFileTree(projectId, path, false, true)
+        .then((result) => {
+          setEntries((prev) => mergeChildrenAtPath(prev, path, result.entries));
+          loadedDirsRef.current.add(path);
+        })
+        .catch((e: any) => {
+          if (e?.status === 404 || e?.code === 'NOT_FOUND') {
+            setFileTreeExpandedPaths((prev) => {
+              const next = new Set(prev);
+              next.delete(path);
+              return next;
+            });
+          } else {
+            console.error('FileTree ensureDirLoaded error', e);
+          }
+        })
+        .finally(() => expandingRef.current.delete(path));
+      expandingRef.current.set(path, p);
     }
-  }, [projectId]);
+    await p;
+  }, [projectId, setFileTreeExpandedPaths]);
 
   // ── Select ─────────────────────────────────────────────────────────────────
 

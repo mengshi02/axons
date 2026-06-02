@@ -74,6 +74,15 @@ block in this file — that's
   --shadow-glow: 0 0 20px rgba(124, 58, 237, 0.4);
   --shadow-glow-soft: 0 0 40px rgba(124, 58, 237, 0.15);
   --shadow-desktop-menu: 0 4px 16px rgba(0, 0, 0, 0.24), 0 1px 4px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(255, 255, 255, 0.04);
+
+  /* Menu — neutral-gray, independent of UI surface color (mirrors IDE menu.* tokens) */
+  --color-menu-bg: #2d2d2d;
+  --color-menu-border: #454545;
+  --color-menu-hover-bg: #094771;
+  --color-menu-hover-fg: #ffffff;
+  --color-menu-separator: #454545;
+  --color-menu-fg: #cccccc;
+  --color-menu-danger-hover-bg: #c42b1c;
 }
 
 /* ═══════════════════════════════════════════════════════════════

@@ -208,7 +208,10 @@ export function ExtensionsPanel({ onClose }: PanelComponentProps) {
     >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 h-[38px] border-b border-border-subtle">
-        <h2 className="text-sm font-semibold text-text-primary">{t('title')}</h2>
+        <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+          <Puzzle className="w-4 h-4 text-text-secondary flex-shrink-0" />
+          {t('title')}
+        </h2>
         <div className="flex items-center gap-1">
           <button
             onClick={handleImport}
