@@ -295,33 +295,26 @@ function App() {
   const isLeftPanelResizing = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(320);
-  // rAF scheduling — coalesce mousemove into a single paint per frame to keep
-  // dragging smooth when the panel hosts an iframe (plugin UI) that reflows.
-  const leftPanelRafIdRef = useRef<number | null>(null);
   const leftPanelPendingWidthRef = useRef<number>(320);
+  // Ref to the left panel DOM element — used for direct style writes during drag
+  // to bypass React re-renders and keep dragging smooth.
+  const leftPanelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const flush = () => {
-      leftPanelRafIdRef.current = null;
-      setLeftPanelWidth(leftPanelPendingWidthRef.current);
-    };
     const onMouseMove = (e: MouseEvent) => {
       if (!isLeftPanelResizing.current) return;
       const delta = e.clientX - startX.current;
       const newWidth = Math.min(600, Math.max(200, startWidth.current + delta));
       leftPanelPendingWidthRef.current = newWidth;
-      if (leftPanelRafIdRef.current == null) {
-        leftPanelRafIdRef.current = requestAnimationFrame(flush);
+      // Write directly to DOM — bypasses React re-render per frame
+      if (leftPanelRef.current) {
+        leftPanelRef.current.style.width = `${newWidth}px`;
       }
     };
     const onMouseUp = () => {
       if (!isLeftPanelResizing.current) return;
       isLeftPanelResizing.current = false;
-      // Commit the final pending width even if a frame was still queued.
-      if (leftPanelRafIdRef.current != null) {
-        cancelAnimationFrame(leftPanelRafIdRef.current);
-        leftPanelRafIdRef.current = null;
-      }
+      // Sync the final width back to React state so future renders use the correct value
       setLeftPanelWidth(leftPanelPendingWidthRef.current);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
@@ -333,10 +326,6 @@ function App() {
     return () => {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
-      if (leftPanelRafIdRef.current != null) {
-        cancelAnimationFrame(leftPanelRafIdRef.current);
-        leftPanelRafIdRef.current = null;
-      }
     };
   }, []);
 
@@ -484,7 +473,8 @@ function App() {
         {/* Left column: File tree on top, analysis panels below - collapsible */}
         {hasLeftContent && (
         <div
-          style={{ width: leftPanelWidth }}
+            ref={leftPanelRef}
+            style={{ width: leftPanelWidth, willChange: 'width', contain: 'layout style' }}
           className="h-full shrink-0 bg-surface border-r border-border-subtle flex flex-col overflow-hidden relative"
         >
           {/* Resize handle on right side */}
@@ -531,9 +521,9 @@ function App() {
         </div>
         )}
 
-        {/* Center column: Graph canvas + center-bottom panels */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          {/* Graph canvas */}
+        {/* Center column: Graph canvas + center-bottom panels (overlaid) */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+          {/* Graph canvas — always takes full height; terminal overlays it */}
           <div className={`flex-1 relative ${hasCenterBottomPanel ? '' : 'min-h-0'}`}>
             {graph ? (
               <GraphCanvas onNodeClick={handleNodeClick} />
@@ -560,7 +550,7 @@ function App() {
             )}
           </div>
 
-          {/* Center-bottom panels (Terminal) */}
+          {/* Center-bottom panels (Terminal) — absolute positioned to overlay graph, not push it */}
           {centerBottomPanels.filter(p => openPanels.has(p.id)).map(p => renderPanel(p.id))}
         </div>
 

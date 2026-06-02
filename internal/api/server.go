@@ -389,6 +389,7 @@ func (s *Server) registerRoutes() {
 	s.router.GET("/api/file", s.handleWebFile)
 	s.router.POST("/api/file", s.handleWebFile)
 	s.router.DELETE("/api/file", s.handleWebFile)
+	s.router.GET("/api/file/raw", s.handleWebFileRaw)
 
 	// File tree operations (handlers_filetree.go)
 	s.router.GET("/api/filetree", s.handleFileTreeList)

@@ -93,7 +93,10 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [panelHeight, setPanelHeight] = useState(320);
-  const [isDragging, setIsDragging] = useState(false);
+  const isDraggingRef = useRef(false);
+  const dragStartY = useRef(0);
+  const dragStartHeight = useRef(320);
+  const pendingHeightRef = useRef(320);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   // Auto-dismiss error after 8 seconds
@@ -475,9 +478,20 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
     // Listen to window resize
     window.addEventListener('resize', handleResize);
 
-    // Use ResizeObserver to monitor container size changes (e.g., when side panel opens/closes)
+    // Use ResizeObserver to monitor container size changes (e.g., when side panel opens/closes).
+    // Debounced to avoid heavy fitAddon.fit() calls during panel drag — drag triggers many
+    // ResizeObserver entries per second; fitting on each one makes all panel dragging sluggish.
+    // During drag, skip entirely because the rAF-scheduled fit in the drag handler already
+    // keeps the terminal in sync — running a second fit via ResizeObserver would be redundant
+    // and cause jank.
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     const resizeObserver = new ResizeObserver(() => {
-      handleResize();
+      if (isDraggingRef.current) return; // skip during drag — rAF fit handles it
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        resizeTimer = null;
+        handleResize();
+      }, 100);
     });
 
     if (panelRef.current) {
@@ -487,6 +501,7 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
     return () => {
       window.removeEventListener('resize', handleResize);
       resizeObserver.disconnect();
+      if (resizeTimer) { clearTimeout(resizeTimer); resizeTimer = null; }
     };
   }, [activeTabId]);
 
@@ -538,23 +553,19 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
     return () => window.removeEventListener('filetree:open-in-terminal', handler);
   }, [activeTabId]);
 
-  // Handle panel drag resize
+  // Handle panel drag resize — uses refs + direct DOM manipulation to avoid
+  // React re-renders on every mousemove. fitAddon.fit() is scheduled via rAF
+  // so it runs at most once per frame (coalescing multiple mousemove events),
+  // keeping the terminal visually in sync without the overhead of per-event fits.
+  const dragRafRef = useRef<number | null>(null);
+
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging || !panelRef.current) return;
-
-      const newHeight = window.innerHeight - e.clientY;
-      const minHeight = 200;
-      const maxHeight = window.innerHeight - 100;
-
-      setPanelHeight(Math.min(Math.max(newHeight, minHeight), maxHeight));
-
-      // Fit terminal immediately during drag to prevent visual gap at bottom
+    const fitTerminal = () => {
+      dragRafRef.current = null;
       const activeInstance = terminalInstancesRef.current.get(activeTabId || '');
       if (activeInstance?.fitAddon && activeInstance?.xterm) {
         try {
           activeInstance.fitAddon.fit();
-          // Send resize to backend
           if (activeInstance.ws && activeInstance.ws.readyState === WebSocket.OPEN) {
             activeInstance.ws.send(JSON.stringify({
               type: 'resize',
@@ -568,26 +579,51 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       }
     };
 
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingRef.current || !panelRef.current) return;
+
+      const newHeight = Math.min(Math.max(window.innerHeight - e.clientY, 200), window.innerHeight - 100);
+      pendingHeightRef.current = newHeight;
+      // Write directly to DOM — bypasses React re-render for each mousemove frame
+      panelRef.current.style.height = `${newHeight}px`;
+
+      // Schedule a fit at most once per animation frame
+      if (dragRafRef.current == null) {
+        dragRafRef.current = requestAnimationFrame(fitTerminal);
+      }
+    };
+
     const handleMouseUp = () => {
-      setIsDragging(false);
+      if (!isDraggingRef.current) return;
+      isDraggingRef.current = false;
+      // Cancel any pending rAF fit — we'll do one final fit below
+      if (dragRafRef.current != null) {
+        cancelAnimationFrame(dragRafRef.current);
+        dragRafRef.current = null;
+      }
+      // Sync the final height back to React state so future renders use the correct value
+      setPanelHeight(pendingHeightRef.current);
       // Reset user-select that was disabled during drag
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
+      // Re-enable pointer events on iframes
+      document.body.classList.remove('axons-resizing');
+
+      // Final fit with the settled dimensions
+      fitTerminal();
     };
 
-    if (isDragging) {
-      // Disable text selection during drag to prevent accidental selections
-      document.body.style.userSelect = 'none';
-      document.body.style.cursor = 'row-resize';
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-    }
-
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      if (dragRafRef.current != null) {
+        cancelAnimationFrame(dragRafRef.current);
+        dragRafRef.current = null;
+      }
     };
-  }, [isDragging]);
+  }, [activeTabId]);
 
   // Add new tab
   const handleAddNewTab = useCallback(async (title?: string) => {
@@ -758,14 +794,25 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
   return (
     <div
       ref={panelRef}
-      className={`border-t border-border-subtle flex flex-col ${isFullscreen ? 'fixed inset-0 z-50' : ''}`}
-      style={{ height: isFullscreen ? '100vh' : panelHeight, minHeight: isFullscreen ? undefined : 200, backgroundColor: TERMINAL_THEMES[theme].background }}
+      className={`border-t border-border-subtle flex flex-col ${isFullscreen ? 'fixed inset-0 z-50' : 'absolute bottom-0 left-0 right-0 z-10'}`}
+      style={{ height: isFullscreen ? '100vh' : panelHeight, minHeight: isFullscreen ? undefined : 200, backgroundColor: TERMINAL_THEMES[theme].background, willChange: 'height', contain: 'size style' }}
     >
       {/* Drag handle */}
       {!isFullscreen && (
         <div
           className="h-1 bg-transparent hover:bg-accent/20 cursor-row-resize transition-colors flex-shrink-0"
-          onMouseDown={() => setIsDragging(true)}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            isDraggingRef.current = true;
+            dragStartY.current = e.clientY;
+            dragStartHeight.current = panelHeight;
+            pendingHeightRef.current = panelHeight;
+            document.body.style.userSelect = 'none';
+            document.body.style.cursor = 'row-resize';
+            // Disable pointer events on iframes during drag (like IDE sash)
+            // Uses the same CSS class as left panel resize — see index.css.
+            document.body.classList.add('axons-resizing');
+          }}
         />
       )}
 

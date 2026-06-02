@@ -29,13 +29,24 @@ const IMAGE_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg', 'ico', 'tiff', 'tif', 'avif',
 ]);
 
+// Video file extensions that should be played via <video> instead of shown as text
+const VIDEO_EXTENSIONS = new Set([
+  'mp4', 'webm', 'ogg', 'm4v',
+]);
+
 /** Check if a file path points to an image file */
 function isImageFile(path: string): boolean {
   const ext = path.split('.').pop()?.toLowerCase() || '';
   return IMAGE_EXTENSIONS.has(ext);
 }
 
-/** Get MIME type from file extension */
+/** Check if a file path points to a video file */
+function isVideoFile(path: string): boolean {
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  return VIDEO_EXTENSIONS.has(ext);
+}
+
+/** Get MIME type from file extension (image) */
 function getImageMimeType(path: string): string {
   const ext = path.split('.').pop()?.toLowerCase() || '';
   const mimeMap: Record<string, string> = {
@@ -45,6 +56,15 @@ function getImageMimeType(path: string): string {
     tif: 'image/tiff', avif: 'image/avif',
   };
   return mimeMap[ext] || 'image/png';
+}
+
+/** Get MIME type from file extension (video) */
+function getVideoMimeType(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  const mimeMap: Record<string, string> = {
+    mp4: 'video/mp4', webm: 'video/webm', ogg: 'video/ogg', m4v: 'video/mp4',
+  };
+  return mimeMap[ext] || 'video/mp4';
 }
 
 const MIN_WIDTH = 320;
@@ -76,8 +96,8 @@ export function CodeReferencesPanel({ onClose: _onClose }: PanelComponentProps) 
   // Virtual scroll: target line to scroll to (1-based)
   const [scrollToLine, setScrollToLine] = useState<number | null>(null);
 
-  // Image preview: stores mimeType when backend indicates isBinary
-  const [imageMimeType, setImageMimeType] = useState<string | null>(null);
+  // Binary preview: stores mimeType when backend indicates isBinary
+  const [binaryMimeType, setBinaryMimeType] = useState<string | null>(null);
 
   // Markdown preview mode (for .md files)
   const [mdPreviewMode, setMdPreviewMode] = useState(true); // true = preview, false = source
@@ -228,8 +248,8 @@ export function CodeReferencesPanel({ onClose: _onClose }: PanelComponentProps) 
       setHighlightRange(null);
     }
 
-    // Clear image mime type when loading a new file from graph node
-    setImageMimeType(isImageFile(filePath) ? getImageMimeType(filePath) : null);
+    // Clear binary mime type when loading a new file from graph node
+    setBinaryMimeType(isImageFile(filePath) ? getImageMimeType(filePath) : isVideoFile(filePath) ? getVideoMimeType(filePath) : null);
 
     // Check cache first
     const cached = getCachedFile(filePath);
@@ -257,7 +277,7 @@ export function CodeReferencesPanel({ onClose: _onClose }: PanelComponentProps) 
         }
         // If backend indicates this is a binary/image file, store MIME type
         if (data.isBinary === 'true' && data.mimeType) {
-          setImageMimeType(data.mimeType);
+          setBinaryMimeType(data.mimeType);
         }
         setCodeContent(content);
       })
@@ -276,8 +296,8 @@ export function CodeReferencesPanel({ onClose: _onClose }: PanelComponentProps) 
     if (activeFilePath) {
       // File tree selection: clear highlight range from graph node
       setHighlightRange(null);
-      // Set imageMimeType based on file extension for file tree selections
-      setImageMimeType(isImageFile(activeFilePath) ? getImageMimeType(activeFilePath) : null);
+      // Set binaryMimeType based on file extension for file tree selections
+      setBinaryMimeType(isImageFile(activeFilePath) ? getImageMimeType(activeFilePath) : isVideoFile(activeFilePath) ? getVideoMimeType(activeFilePath) : null);
     } else if (prev !== null && !activeFilePath && nodeFileInfo) {
       // activeFilePath went from non-null → null (switching back to graph node from file tree).
       // If nodeFileInfo hasn't changed, the main useEffect above won't re-trigger,
@@ -646,15 +666,27 @@ export function CodeReferencesPanel({ onClose: _onClose }: PanelComponentProps) 
                 <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
               </div>
             ) : codeContent !== null ? (
-                // ── Image preview ──
                 isImageFile(filePath) ? (
+                  // ── Image preview ──
                   <div className="flex-1 overflow-auto flex items-center justify-center bg-elevated p-4">
                     <img
-                      src={`data:${imageMimeType || getImageMimeType(filePath)};base64,${codeContent}`}
+                      src={`data:${binaryMimeType || getImageMimeType(filePath)};base64,${codeContent}`}
                       alt={filePath.split('/').pop() || 'Image'}
                       className="max-w-full max-h-full object-contain rounded shadow-lg"
                       style={{ imageRendering: 'auto' }}
                     />
+                  </div>
+                ) : isVideoFile(filePath) ? (
+                  // ── Video preview (streamed via /api/file/raw for browser compatibility) ──
+                  <div className="flex-1 overflow-auto flex items-center justify-center bg-elevated p-4">
+                    <video
+                      src={`/api/file/raw?path=${encodeURIComponent(filePath)}&project_id=${encodeURIComponent(currentProject?.id || '')}`}
+                      controls
+                      className="max-w-full max-h-full rounded shadow-lg"
+                      style={{ outline: 'none' }}
+                    >
+                      Your browser does not support video playback.
+                    </video>
                   </div>
                 ) : (
                 <div className="flex-1 overflow-hidden relative">
@@ -748,7 +780,7 @@ export function CodeReferencesPanel({ onClose: _onClose }: PanelComponentProps) 
                         />
                   )}
               </div>
-                  )
+                    )
             ) : (
               <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
                     {(nodeData?.label === 'File' || activeFilePath) ? 'No code content available' : 'Select a file to view code'}

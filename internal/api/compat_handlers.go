@@ -1085,8 +1085,10 @@ func (s *Server) resolveFilePath(filePath string, projectID string) string {
 	return absPath
 }
 
-// imageExtensions maps file extensions to MIME types for image preview.
-var imageExtensions = map[string]string{
+// binaryExtensions maps file extensions to MIME types for binary file preview.
+// This includes image formats (rendered via <img>) and video formats (rendered via <video>).
+var binaryExtensions = map[string]string{
+	// Images
 	".png":  "image/png",
 	".jpg":  "image/jpeg",
 	".jpeg": "image/jpeg",
@@ -1098,6 +1100,11 @@ var imageExtensions = map[string]string{
 	".tiff": "image/tiff",
 	".tif":  "image/tiff",
 	".avif": "image/avif",
+	// Videos (browser-friendly formats)
+	".mp4":  "video/mp4",
+	".webm": "video/webm",
+	".ogg":  "video/ogg",
+	".m4v":  "video/mp4",
 }
 
 // handleFileGet handles GET requests to read file content
@@ -1113,8 +1120,8 @@ func (s *Server) handleFileGet(w http.ResponseWriter, absPath string) {
 	}
 
 	ext := strings.ToLower(filepath.Ext(absPath))
-	if mimeType, ok := imageExtensions[ext]; ok {
-		// Image file: return base64-encoded content with MIME type so
+	if mimeType, ok := binaryExtensions[ext]; ok {
+		// Binary file (image/video): return base64-encoded content with MIME type so
 		// the frontend can render it via a data URL instead of showing
 		// garbled binary text.
 		encoded := base64.StdEncoding.EncodeToString(content)
@@ -1132,6 +1139,52 @@ func (s *Server) handleFileGet(w http.ResponseWriter, absPath string) {
 		"content": string(content),
 		"path":    absPath,
 	})
+}
+
+// ====== GET /api/file/raw - Stream raw file content ======
+
+// handleWebFileRaw streams the raw bytes of a file directly, with proper
+// Content-Type and Content-Length headers. This is used by the frontend
+// for <video> / <audio> elements that cannot load from base64 data URLs.
+func (s *Server) handleWebFileRaw(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", i18n.T("api.error.pathParamRequired"))
+		return
+	}
+
+	// Security check: prevent path traversal
+	if strings.Contains(filePath, "..") {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", i18n.T("api.error.invalidPath"))
+		return
+	}
+
+	absPath := s.resolveFilePath(filePath, r.URL.Query().Get("project_id"))
+
+	// Stat the file to get size and handle range requests
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", i18n.T("api.error.fileNotFound"))
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", fmt.Sprintf("Failed to stat file: %v", err))
+		return
+	}
+
+	// Determine Content-Type from extension
+	ext := strings.ToLower(filepath.Ext(absPath))
+	contentType := "application/octet-stream"
+	if mimeType, ok := binaryExtensions[ext]; ok {
+		contentType = mimeType
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
+	w.Header().Set("Accept-Ranges", "bytes")
+
+	// Handle HTTP Range requests (essential for video seeking)
+	http.ServeFile(w, r, absPath)
 }
 
 // handleFileWrite handles POST requests to write file content
