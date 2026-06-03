@@ -256,25 +256,25 @@ export const ChangeList: React.FC<ChangeListProps> = ({ sessionId, projectId, re
       </div>
 
       {/* Diff Modal */}
-      <Modal isOpen={!!diffModal} onClose={() => setDiffModal(null)} size="xl" overlayOpacity="none" backdropBlur={false} className="max-h-[80vh] flex flex-col">
+      <Modal isOpen={!!diffModal} onClose={() => setDiffModal(null)} size="xl" overlayOpacity="light" backdropBlur={true} className="max-h-[80vh] flex flex-col">
         {diffModal && (
           <>
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <div className="flex items-center gap-2">
-                <Eye className="w-4 h-4 text-text-muted" />
-                <span className="font-medium text-sm">{diffModal.path}</span>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle bg-elevated/50">
+              <div className="flex items-center gap-2 min-w-0">
+                <Eye className="w-4 h-4 shrink-0 text-text-secondary" />
+                <span className="font-medium text-sm text-text-primary truncate">{diffModal.path}</span>
                 {diffModal.diff && (
-                  <span className="text-xs text-text-muted ml-2">
-                    +{diffModal.diff.stats.added} -{diffModal.diff.stats.removed}
+                  <span className="text-xs text-text-muted ml-2 shrink-0">
+                    +{diffModal.diff.stats.added} <span className="text-green-500">●</span> -{diffModal.diff.stats.removed} <span className="text-red-500">●</span>
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 <button
                   onClick={() => handleRevertFile(diffModal.path)}
                   disabled={revertingPath === diffModal.path}
-                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-red-500 hover:text-red-600 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50"
                 >
                   <RotateCcw className={`w-3.5 h-3.5 ${revertingPath === diffModal.path ? 'animate-spin' : ''}`} />
                   Revert
@@ -289,31 +289,64 @@ export const ChangeList: React.FC<ChangeListProps> = ({ sessionId, projectId, re
             </div>
 
             {/* Modal Content */}
-            <div className="flex-1 overflow-auto p-4">
+            <div className="flex-1 overflow-auto p-0 bg-deep/50">
               {diffModal.loading ? (
                 <div className="flex items-center justify-center h-32 text-text-muted">
                   Loading diff...
                 </div>
               ) : diffModal.diff ? (
                   Array.isArray(diffModal.diff.diff) && diffModal.diff.diff.length > 0 ? (
-                    <pre className="text-xs font-mono">
+                    <div
+                      className="p-4 font-mono text-xs leading-5 select-text"
+                      onKeyDown={e => {
+                        // Allow Cmd/Ctrl+A to select only diff text content
+                        if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
+                          e.stopPropagation();
+                          const sel = window.getSelection();
+                          if (sel && e.currentTarget.contains(e.currentTarget.firstChild)) {
+                            const range = document.createRange();
+                            range.selectNodeContents(e.currentTarget);
+                            sel.removeAllRanges();
+                            sel.addRange(range);
+                            e.preventDefault();
+                          }
+                        }
+                      }}
+                    >
                       {diffModal.diff.diff.map((line, i) => (
                         <div
                           key={i}
-                          className={`${line.type === 'insert'
-                            ? 'bg-green-500/20 text-green-600 dark:text-green-400'
-                            : line.type === 'delete'
-                              ? 'bg-red-500/20 text-red-600 dark:text-red-400'
-                              : 'text-text-muted'
+                          className={`flex ${line.type === 'insert'
+                              ? 'bg-green-500/10'
+                              : line.type === 'delete'
+                                ? 'bg-red-500/10'
+                                : ''
                             }`}
                         >
-                          <span className="inline-block w-6 text-center select-none opacity-50">
+                          <span
+                            className={`inline-block w-8 text-right pr-3 select-none shrink-0 ${line.type === 'insert'
+                                ? 'text-green-500/60'
+                                : line.type === 'delete'
+                                  ? 'text-red-500/60'
+                                  : 'text-text-muted/40'
+                              }`}
+                          >
                             {line.type === 'insert' ? '+' : line.type === 'delete' ? '-' : ' '}
                           </span>
-                          {line.text}
+                          <span
+                            className={
+                              line.type === 'insert'
+                                ? 'text-green-400'
+                                : line.type === 'delete'
+                                  ? 'text-red-400'
+                                  : 'text-text-secondary'
+                            }
+                          >
+                            {line.text}
+                          </span>
                         </div>
                       ))}
-                  </pre>
+                    </div>
                 ) : (
                     <div className="flex flex-col items-center justify-center h-32 text-text-muted">
                         <div>{t('changeList.noDifferences')}</div>

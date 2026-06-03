@@ -613,6 +613,13 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       }
     };
 
+    // Mirror VS Code's TerminalResizeDebouncer threshold:
+    // when the normal buffer is small (< 200 lines) xterm.resize() is cheap,
+    // so we keep the real-time row update.  Once the buffer grows large the
+    // per-frame resize becomes expensive (O(buffer size)), so we skip it and
+    // let the single fitAddon.fit() call in handleMouseUp handle everything.
+    const START_DEBOUNCING_THRESHOLD = 200;
+
     let rafId: number | null = null;
 
     const handleMouseMove = (e: MouseEvent) => {
@@ -629,6 +636,13 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
         // Use ref — always current tab id, no stale-closure risk.
         const activeInstance = terminalInstancesRef.current.get(activeTabIdRef.current || '');
         if (!activeInstance?.xterm || !panelRef.current) return;
+
+        // Skip per-frame xterm.resize() when the buffer is large — it would
+        // iterate every scrollback line on each animation frame, causing the
+        // drag to feel increasingly sluggish over time.  The final
+        // fitAddon.fit() in handleMouseUp will do one correct resize instead.
+        if (activeInstance.xterm.buffer.normal.length >= START_DEBOUNCING_THRESHOLD) return;
+
         // Use the active tab's container via data attribute — querySelector()
         // without a filter would return the first container which may be
         // display:none (clientHeight=0) when it belongs to an inactive tab.
