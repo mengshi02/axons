@@ -32,7 +32,7 @@ const TERMINAL_THEMES = {
     foreground: '#e4e4ed', // --color-text-primary
     cursor: '#7c3aed', // --color-accent (紫色)
     cursorAccent: '#0a0a10',
-    selectionBackground: '#7c3aed55', // 半透明紫色
+    selectionBackground: '#7c3aed40', // 半透明紫色（~25%透明度，暗色主题下可视且不遮挡文字）
     selectionForeground: '#e4e4ed',
     black: '#06060a',
     red: '#f14c4c',
@@ -56,7 +56,7 @@ const TERMINAL_THEMES = {
     foreground: '#1a1a2e',
     cursor: '#2563eb', // Blue cursor for light theme
     cursorAccent: '#ffffff',
-    selectionBackground: '#2563eb33', // 半透明蓝色
+    selectionBackground: '#2563eb55', // 半透明蓝色（~33%透明度，亮色主题下清晰可见）
     selectionForeground: '#1a1a2e',
     black: '#000000',
     red: '#dc2626',
@@ -97,6 +97,10 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
   const dragStartY = useRef(0);
   const dragStartHeight = useRef(320);
   const pendingHeightRef = useRef(320);
+  // Always up-to-date ref for activeTabId — safe to read inside event handler
+  // closures without stale-closure issues.
+  const activeTabIdRef = useRef<string | null>(null);
+  activeTabIdRef.current = activeTabId;
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   // Auto-dismiss error after 8 seconds
@@ -344,16 +348,19 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       const currentInstance = terminalInstancesRef.current.get(tabId);
 
       if (msg.type === 'output' && currentInstance?.xterm) {
+        // In alternate buffer (full-screen TUI like top/vim), don't force
+        // scrollToBottom — the program manages its own cursor position.
+        const isAltBuffer = currentInstance.xterm.buffer.active.type === 'alternate';
         currentInstance.xterm.write(msg.data, () => {
-          // Scroll to bottom after write completes
-          currentInstance.xterm.scrollToBottom();
+          if (!isAltBuffer) currentInstance.xterm.scrollToBottom();
         });
         // Update sequence tracking
         if (msg.seq) lastSeqRef.current.set(tabId, msg.seq);
       } else if (msg.type === 'replay' && currentInstance?.xterm) {
         // Replayed historical output from server
+        const isAltBuffer = currentInstance.xterm.buffer.active.type === 'alternate';
         currentInstance.xterm.write(msg.data, () => {
-          currentInstance.xterm.scrollToBottom();
+          if (!isAltBuffer) currentInstance.xterm.scrollToBottom();
         });
       } else if (msg.type === 'sync') {
         // Server sent current sequence number after replay
@@ -606,6 +613,8 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       }
     };
 
+    let rafId: number | null = null;
+
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDraggingRef.current || !panelRef.current) return;
 
@@ -613,18 +622,29 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       pendingHeightRef.current = newHeight;
       panelRef.current.style.height = `${newHeight}px`;
 
-      // Immediately resize rows — cheap, no reflow, bottom content stays put.
-      const activeInstance = terminalInstancesRef.current.get(activeTabId || '');
-      if (!activeInstance?.xterm) return;
-      const container = panelRef.current.querySelector('.xterm-container') as HTMLElement | null;
-      if (!container) return;
-      resizeRows(activeInstance.xterm, container.clientHeight);
-      sendResize(activeInstance.ws, activeInstance.xterm);
+      // Throttle to one resize per animation frame.
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        // Use ref — always current tab id, no stale-closure risk.
+        const activeInstance = terminalInstancesRef.current.get(activeTabIdRef.current || '');
+        if (!activeInstance?.xterm || !panelRef.current) return;
+        // Use the active tab's container via data attribute — querySelector()
+        // without a filter would return the first container which may be
+        // display:none (clientHeight=0) when it belongs to an inactive tab.
+        const container = panelRef.current.querySelector<HTMLElement>(
+          `.xterm-container[data-tab-id="${activeTabIdRef.current}"]`
+        );
+        if (!container) return;
+        resizeRows(activeInstance.xterm, container.clientHeight);
+        sendResize(activeInstance.ws, activeInstance.xterm);
+      });
     };
 
     const handleMouseUp = () => {
       if (!isDraggingRef.current) return;
       isDraggingRef.current = false;
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
       setPanelHeight(pendingHeightRef.current);
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
@@ -634,9 +654,9 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       if (colsDebounceTimer) clearTimeout(colsDebounceTimer);
       colsDebounceTimer = setTimeout(() => {
         colsDebounceTimer = null;
-        const activeInstance = terminalInstancesRef.current.get(activeTabId || '');
+        // Use ref — always current tab id.
+        const activeInstance = terminalInstancesRef.current.get(activeTabIdRef.current || '');
         if (!activeInstance?.fitAddon || !activeInstance?.xterm) return;
-        // Use fitAddon for the final full fit (cols + rows).
         try {
           activeInstance.fitAddon.fit();
           sendResize(activeInstance.ws, activeInstance.xterm);
@@ -650,8 +670,9 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
       if (colsDebounceTimer) clearTimeout(colsDebounceTimer);
+      if (rafId !== null) cancelAnimationFrame(rafId);
     };
-  }, [activeTabId]);
+  }, []); // registered once — reads activeTabId via ref, no stale closure
 
   // Add new tab
   const handleAddNewTab = useCallback(async (title?: string) => {
@@ -956,6 +977,7 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
               }
             }}
             className="absolute inset-0 xterm-container"
+            data-tab-id={tab.id}
             style={{
               display: tab.id === activeTabId ? 'block' : 'none',
               pointerEvents: tab.id === activeTabId ? 'auto' : 'none'

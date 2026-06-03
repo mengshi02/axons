@@ -288,100 +288,145 @@ export function GraphCanvas({ onNodeClick }: GraphCanvasProps) {
     <div className="relative h-full w-full bg-deep">
       <div ref={containerRef} className="h-full w-full" />
 
-      {/* Graph controls */}
-      {sigma && (
-        <div className="absolute bottom-4 left-4 flex flex-col gap-2">
+      {/* Toolbar: controls in one horizontal row */}
+      {hasGraph && (
+        <div className="absolute top-4 left-4 flex items-center gap-1.5">
+          {/* Reset view */}
           <button
-            onClick={() => {
-              sigma.getCamera().animatedReset();
-            }}
+            onClick={() => sigma?.getCamera().animatedReset()}
             className="p-2 bg-surface border border-border-subtle rounded-lg text-text-secondary hover:text-text-primary hover:bg-hover transition-colors"
             title="Reset view"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
             </svg>
           </button>
+
+          {/* Stop layout */}
           <button
             onClick={() => stopLayout()}
             className="p-2 bg-surface border border-border-subtle rounded-lg text-text-secondary hover:text-text-primary hover:bg-hover transition-colors"
             title="Stop layout"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
             </svg>
           </button>
+
+          {/* Start layout */}
           <button
             onClick={() => startLayout()}
             className="p-2 bg-surface border border-border-subtle rounded-lg text-text-secondary hover:text-text-primary hover:bg-hover transition-colors"
             title="Start layout"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </button>
 
-          {/* Layout mode switcher */}
-          <div className="flex flex-col gap-1 mt-1 pt-1 border-t border-border-subtle">
-            <button
-              onClick={() => setLayoutMode('force')}
-              className={`p-2 rounded-lg text-xs transition-colors ${layoutMode === 'force' ? 'bg-accent text-white' : 'bg-surface border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-hover'}`}
-              title="Force layout"
-            >
-              Force
-            </button>
-            <button
-              onClick={() => setLayoutMode('tree')}
-              className={`p-2 rounded-lg text-xs transition-colors ${layoutMode === 'tree' ? 'bg-accent text-white' : 'bg-surface border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-hover'}`}
-              title="Tree layout"
-            >
-              Tree
-            </button>
-            <button
-              onClick={() => setLayoutMode('circles')}
-              className={`p-2 rounded-lg text-xs transition-colors ${layoutMode === 'circles' ? 'bg-accent text-white' : 'bg-surface border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-hover'}`}
-              title="Circles layout"
-            >
-              Circles
-            </button>
-          </div>
+          {/* Divider */}
+          <div className="w-px h-5 bg-border-subtle mx-0.5" />
+
+          {/* Force layout - network/nodes icon */}
+          <button
+            onClick={() => setLayoutMode('force')}
+            className={`p-2 rounded-lg transition-colors ${layoutMode === 'force' ? 'bg-accent text-white' : 'bg-surface border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-hover'}`}
+            title="Force layout"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <circle cx="12" cy="5" r="2" strokeWidth={2} />
+              <circle cx="5" cy="19" r="2" strokeWidth={2} />
+              <circle cx="19" cy="19" r="2" strokeWidth={2} />
+              <line x1="12" y1="7" x2="5" y2="17" strokeWidth={1.5} />
+              <line x1="12" y1="7" x2="19" y2="17" strokeWidth={1.5} />
+              <line x1="7" y1="19" x2="17" y2="19" strokeWidth={1.5} />
+            </svg>
+          </button>
+
+          {/* Tree layout - hierarchy icon */}
+          <button
+            onClick={() => setLayoutMode('tree')}
+            className={`p-2 rounded-lg transition-colors ${layoutMode === 'tree' ? 'bg-accent text-white' : 'bg-surface border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-hover'}`}
+            title="Tree layout"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v4m0 0H8m4 0h4M6 12h4m4 0h4M12 8v4m0 0v4m0 0H8m4 0h4" />
+              <circle cx="12" cy="4" r="1.5" fill="currentColor" />
+              <circle cx="4" cy="12" r="1.5" fill="currentColor" />
+              <circle cx="20" cy="12" r="1.5" fill="currentColor" />
+              <circle cx="8" cy="20" r="1.5" fill="currentColor" />
+              <circle cx="16" cy="20" r="1.5" fill="currentColor" />
+            </svg>
+          </button>
+
+          {/* Circles layout - concentric circles icon */}
+          <button
+            onClick={() => setLayoutMode('circles')}
+            className={`p-2 rounded-lg transition-colors ${layoutMode === 'circles' ? 'bg-accent text-white' : 'bg-surface border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-hover'}`}
+            title="Circles layout"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="9" strokeWidth={1.5} />
+              <circle cx="12" cy="12" r="5.5" strokeWidth={1.5} />
+              <circle cx="12" cy="12" r="2" fill="currentColor" />
+            </svg>
+          </button>
+
+          {/* Divider */}
+          <div className="w-px h-5 bg-border-subtle mx-0.5" />
 
           {/* Edge rendering mode toggle */}
-          <div className="flex flex-col gap-1 mt-1 pt-1 border-t border-border-subtle">
-            <button
-              onClick={() => setShowAllEdges(!showAllEdges)}
-              className={`p-2 rounded-lg text-xs transition-colors ${showAllEdges ? 'bg-accent text-white' : 'bg-surface border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-hover'}`}
-              title={showAllEdges ? 'Show all edges (click to show only selected node edges)' : 'Show only selected node edges (click to show all)'}
-            >
-              {showAllEdges ? 'Edges: All' : 'Edges: Sel'}
-            </button>
-          </div>
+          <button
+            onClick={() => setShowAllEdges(!showAllEdges)}
+            className={`p-2 rounded-lg transition-colors ${showAllEdges ? 'bg-accent text-white' : 'bg-surface border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-hover'}`}
+            title={showAllEdges ? 'Show all edges (click to show only selected node edges)' : 'Show only selected node edges (click to show all)'}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              {showAllEdges ? (
+                <>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.102 1.101" />
+                </>
+              ) : (
+                <>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.102 1.101" />
+                  <line x1="4" y1="4" x2="20" y2="20" strokeWidth={2} />
+                </>
+              )}
+            </svg>
+          </button>
         </div>
       )}
 
-      {/* Legend - Dynamic based on actual node types in graph */}
-      {legendItems.length > 0 && (
-        <div className="absolute top-4 right-4 p-3 bg-surface border border-border-subtle rounded-lg shadow-lg">
-          <div className="text-xs font-medium text-text-primary mb-2">Legend</div>
-          <div className="flex flex-col gap-1.5 text-xs">
-            {legendItems.map(({ label, color }) => (
-              <div key={label} className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
-                <span className="text-text-secondary">{label}</span>
-              </div>
-            ))}
+      {/* FPS indicator + Legend - top right */}
+      <div className="absolute top-4 right-4 flex flex-col gap-2 items-end">
+        {/* FPS indicator */}
+        {hasGraph && (
+          <div className="px-2 py-1 bg-surface/80 border border-border-subtle rounded text-xs text-text-muted tabular-nums">
+            {fps} FPS
           </div>
-        </div>
-      )}
+        )}
 
-      {/* FPS indicator */}
-      {hasGraph && (
-        <div className="absolute top-4 left-4 px-2 py-1 bg-surface/80 border border-border-subtle rounded text-xs text-text-muted">
-          {fps} FPS
-        </div>
-      )}
+        {/* Legend - Dynamic based on actual node types in graph */}
+        {legendItems.length > 0 && (
+          <div className="p-3 bg-surface border border-border-subtle rounded-lg shadow-lg">
+            <div className="text-xs font-medium text-text-primary mb-2">Legend</div>
+            <div className="flex flex-col gap-1.5 text-xs">
+              {legendItems.map(({ label, color }) => (
+                <div key={label} className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
+                  <span className="text-text-secondary">{label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+
 
       {/* Low-FPS degradation warning */}
       {isLowFPS && (

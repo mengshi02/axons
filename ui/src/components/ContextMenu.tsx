@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useIframePointerEvents } from '../hooks/useIframePointerEvents';
 
 export interface ContextMenuItem {
@@ -95,7 +96,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     });
   }, [x, y, items]);
 
-  return (
+  return createPortal(
     <div
       ref={menuRef}
       style={menuStyle}
@@ -136,6 +137,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
           </button>
         );
       })}
-    </div>
+    </div>,
+    document.body
   );
 }
