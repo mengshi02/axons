@@ -234,14 +234,20 @@ body.axons-resizing iframe {
 .xterm-viewport {
   scrollbar-width: thin;
 }
-/* Prevent grey strip at bottom of terminal during resize/drag */
+/* xterm container fills the parent area so fitAddon can measure clientHeight.
+   The .xterm element itself is bottom-anchored (mirroring VS Code's terminal.css):
+     position:absolute; bottom:0; left:0; right:0
+   This means the canvas always sticks to the bottom of its container. When
+   rows increase (resize), the canvas grows UPWARD — bottom content never moves. */
 .xterm-container .xterm {
-  height: 100%;
+  position: absolute !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  /* No top / height — canvas height = rows × cellHeight, grows upward */
 }
 
 .xterm-container .xterm-viewport {
-  /* xterm.css sets background-color: #000 which shows as a strip
-     in light theme. Make transparent so .xterm's theme bg shows through. */
   background-color: transparent !important;
   overflow-y: auto !important;
 }

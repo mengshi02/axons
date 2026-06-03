@@ -458,6 +458,9 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       // Use active tab's instance instead of refs
       const activeInstance = terminalInstancesRef.current.get(activeTabId || '');
       if (activeInstance?.fitAddon && activeInstance?.xterm) {
+        const xterm = activeInstance.xterm;
+        // Remember scroll position before fit
+        const wasAtBottom = xterm.buffer.active.viewportY >= xterm.buffer.active.baseY - xterm.rows;
         try {
           activeInstance.fitAddon.fit();
 
@@ -465,9 +468,14 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
           if (activeInstance.ws && activeInstance.ws.readyState === WebSocket.OPEN) {
             activeInstance.ws.send(JSON.stringify({
               type: 'resize',
-              cols: activeInstance.xterm.cols,
-              rows: activeInstance.xterm.rows,
+              cols: xterm.cols,
+              rows: xterm.rows,
             }));
+          }
+
+          // Keep content pinned to bottom if user was already there
+          if (wasAtBottom) {
+            xterm.scrollToBottom();
           }
         } catch (e) {
           // Ignore fit errors during resize
@@ -479,14 +487,10 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
     window.addEventListener('resize', handleResize);
 
     // Use ResizeObserver to monitor container size changes (e.g., when side panel opens/closes).
-    // Debounced to avoid heavy fitAddon.fit() calls during panel drag — drag triggers many
-    // ResizeObserver entries per second; fitting on each one makes all panel dragging sluggish.
-    // During drag, skip entirely because the rAF-scheduled fit in the drag handler already
-    // keeps the terminal in sync — running a second fit via ResizeObserver would be redundant
-    // and cause jank.
+    // Debounced to avoid heavy fitAddon.fit() calls during rapid size changes.
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     const resizeObserver = new ResizeObserver(() => {
-      if (isDraggingRef.current) return; // skip during drag — rAF fit handles it
+      if (isDraggingRef.current) return; // skip during drag — mouseup handles the final fit
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
         resizeTimer = null;
@@ -510,6 +514,9 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
     // Use active tab's fitAddon instead of the ref
     const activeInstance = terminalInstancesRef.current.get(activeTabId || '');
     if (activeInstance?.fitAddon && activeInstance?.xterm) {
+      const xterm = activeInstance.xterm;
+      // Remember scroll position before fit
+      const wasAtBottom = xterm.buffer.active.viewportY >= xterm.buffer.active.baseY - xterm.rows;
       setTimeout(() => {
         try {
           activeInstance.fitAddon.fit();
@@ -518,9 +525,14 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
           if (activeInstance.ws?.readyState === WebSocket.OPEN) {
             activeInstance.ws.send(JSON.stringify({
               type: 'resize',
-              cols: activeInstance.xterm.cols,
-              rows: activeInstance.xterm.rows,
+              cols: xterm.cols,
+              rows: xterm.rows,
             }));
+          }
+
+          // Keep content pinned to bottom if user was already there
+          if (wasAtBottom) {
+            xterm.scrollToBottom();
           }
         } catch (e) {
           // Ignore fit errors
@@ -553,29 +565,44 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
     return () => window.removeEventListener('filetree:open-in-terminal', handler);
   }, [activeTabId]);
 
-  // Handle panel drag resize — uses refs + direct DOM manipulation to avoid
-  // React re-renders on every mousemove. fitAddon.fit() is scheduled via rAF
-  // so it runs at most once per frame (coalescing multiple mousemove events),
-  // keeping the terminal visually in sync without the overhead of per-event fits.
-  const dragRafRef = useRef<number | null>(null);
+  // Handle panel drag resize.
+  //
+  // Mirrors VS Code's TerminalResizeDebouncer strategy:
+  //   - rows: updated immediately on every mousemove frame (cheap — just
+  //     extends the viewport into the scrollback buffer, no reflow needed).
+  //     This makes new lines appear at the top in real-time while the bottom
+  //     content stays absolutely still.
+  //   - cols: debounced 100 ms after drag ends (expensive — triggers full
+  //     text-reflow across all lines).
+  //
+  // Computing new rows without fitAddon: derive cell height from the xterm
+  // canvas, then rows = floor(containerHeight / cellHeight).
 
   useEffect(() => {
-    const fitTerminal = () => {
-      dragRafRef.current = null;
-      const activeInstance = terminalInstancesRef.current.get(activeTabId || '');
-      if (activeInstance?.fitAddon && activeInstance?.xterm) {
-        try {
-          activeInstance.fitAddon.fit();
-          if (activeInstance.ws && activeInstance.ws.readyState === WebSocket.OPEN) {
-            activeInstance.ws.send(JSON.stringify({
-              type: 'resize',
-              cols: activeInstance.xterm.cols,
-              rows: activeInstance.xterm.rows,
-            }));
-          }
-        } catch (_e) {
-          // Ignore fit errors during drag
-        }
+    let colsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const getCellHeight = (xterm: XTerm): number => {
+      // xterm exposes cell dimensions on the internal _core renderer.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const core = (xterm as any)._core;
+      return core?._renderService?._renderer?.value?._charSizeService?.height
+        || core?._renderService?.dimensions?.device?.cell?.height
+        || core?.viewport?._currentRowHeight
+        || 16; // fallback
+    };
+
+    const resizeRows = (xterm: XTerm, containerHeight: number) => {
+      const cellH = getCellHeight(xterm);
+      if (!cellH) return;
+      const newRows = Math.max(1, Math.floor(containerHeight / cellH));
+      if (newRows !== xterm.rows) {
+        xterm.resize(xterm.cols, newRows);
+      }
+    };
+
+    const sendResize = (ws: WebSocket | null, xterm: XTerm) => {
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'resize', cols: xterm.cols, rows: xterm.rows }));
       }
     };
 
@@ -584,33 +611,37 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
 
       const newHeight = Math.min(Math.max(window.innerHeight - e.clientY, 200), window.innerHeight - 100);
       pendingHeightRef.current = newHeight;
-      // Write directly to DOM — bypasses React re-render for each mousemove frame
       panelRef.current.style.height = `${newHeight}px`;
 
-      // Schedule a fit at most once per animation frame
-      if (dragRafRef.current == null) {
-        dragRafRef.current = requestAnimationFrame(fitTerminal);
-      }
+      // Immediately resize rows — cheap, no reflow, bottom content stays put.
+      const activeInstance = terminalInstancesRef.current.get(activeTabId || '');
+      if (!activeInstance?.xterm) return;
+      const container = panelRef.current.querySelector('.xterm-container') as HTMLElement | null;
+      if (!container) return;
+      resizeRows(activeInstance.xterm, container.clientHeight);
+      sendResize(activeInstance.ws, activeInstance.xterm);
     };
 
     const handleMouseUp = () => {
       if (!isDraggingRef.current) return;
       isDraggingRef.current = false;
-      // Cancel any pending rAF fit — we'll do one final fit below
-      if (dragRafRef.current != null) {
-        cancelAnimationFrame(dragRafRef.current);
-        dragRafRef.current = null;
-      }
-      // Sync the final height back to React state so future renders use the correct value
       setPanelHeight(pendingHeightRef.current);
-      // Reset user-select that was disabled during drag
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
-      // Re-enable pointer events on iframes
       document.body.classList.remove('axons-resizing');
 
-      // Final fit with the settled dimensions
-      fitTerminal();
+      // After drag ends: debounce cols resize (expensive reflow).
+      if (colsDebounceTimer) clearTimeout(colsDebounceTimer);
+      colsDebounceTimer = setTimeout(() => {
+        colsDebounceTimer = null;
+        const activeInstance = terminalInstancesRef.current.get(activeTabId || '');
+        if (!activeInstance?.fitAddon || !activeInstance?.xterm) return;
+        // Use fitAddon for the final full fit (cols + rows).
+        try {
+          activeInstance.fitAddon.fit();
+          sendResize(activeInstance.ws, activeInstance.xterm);
+        } catch (_e) { /* ignore */ }
+      }, 100);
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -618,10 +649,7 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
-      if (dragRafRef.current != null) {
-        cancelAnimationFrame(dragRafRef.current);
-        dragRafRef.current = null;
-      }
+      if (colsDebounceTimer) clearTimeout(colsDebounceTimer);
     };
   }, [activeTabId]);
 
@@ -795,7 +823,7 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
     <div
       ref={panelRef}
       className={`border-t border-border-subtle flex flex-col ${isFullscreen ? 'fixed inset-0 z-50' : 'absolute bottom-0 left-0 right-0 z-10'}`}
-      style={{ height: isFullscreen ? '100vh' : panelHeight, minHeight: isFullscreen ? undefined : 200, backgroundColor: TERMINAL_THEMES[theme].background, willChange: 'height', contain: 'size style' }}
+      style={{ height: isFullscreen ? '100vh' : panelHeight, minHeight: isFullscreen ? undefined : 200, backgroundColor: TERMINAL_THEMES[theme].background, willChange: 'height' }}
     >
       {/* Drag handle */}
       {!isFullscreen && (
@@ -809,8 +837,6 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
             pendingHeightRef.current = panelHeight;
             document.body.style.userSelect = 'none';
             document.body.style.cursor = 'row-resize';
-            // Disable pointer events on iframes during drag (like IDE sash)
-            // Uses the same CSS class as left panel resize — see index.css.
             document.body.classList.add('axons-resizing');
           }}
         />
@@ -932,8 +958,6 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
             className="absolute inset-0 xterm-container"
             style={{
               display: tab.id === activeTabId ? 'block' : 'none',
-              height: '100%',
-              width: '100%',
               pointerEvents: tab.id === activeTabId ? 'auto' : 'none'
             }}
           />
