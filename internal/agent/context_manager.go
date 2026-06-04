@@ -33,54 +33,142 @@ func NewContextManager(maxMessages, maxTokens int, compressionRatio float64) *Co
 	}
 }
 
-// CompressMessages compresses message history
-// When message count exceeds limit, keeps system message and recent messages, summarizes the middle part
+// CompressMessages compresses message history while preserving structural validity
+// required by LLM APIs:
+//
+//  1. The first system message (if any) is always kept.
+//  2. The compressed slice MUST contain at least one role=user message — many
+//     gateways (including the one in handlers_chat.go) reject requests
+//     without a user query ("No user query found in messages").
+//  3. tool_calls/tool messages must remain paired: a role=tool message must be
+//     preceded (somewhere earlier in the slice) by an assistant message whose
+//     ToolCalls includes its ToolID. We never start the kept window with a
+//     role=tool message orphaned from its assistant parent.
+//
+// Strategy:
+//   - Keep system[0] (if present).
+//   - Pick a recent tail window of size `recentCount`, then expand it leftward
+//     to a turn boundary so it does not start with an orphan role=tool message.
+//   - Replace dropped middle messages with a single system summary.
+//   - If the recent window does not contain any user message, splice the most
+//     recent user message from the dropped middle BEFORE the recent window so
+//     the LLM still sees a user query.
 func (cm *ContextManager) CompressMessages(messages []llm.Message) []llm.Message {
 	if len(messages) <= cm.maxMessages {
 		return messages
 	}
 
-	// Keep system message (first one)
-	if len(messages) == 0 || messages[0].Role != "system" {
-		// No system message, directly take recent messages
-		return messages[len(messages)-cm.maxMessages:]
+	// Identify system prefix (only first system message, conventionally messages[0])
+	var systemMsg *llm.Message
+	body := messages
+	if len(messages) > 0 && messages[0].Role == "system" {
+		s := messages[0]
+		systemMsg = &s
+		body = messages[1:]
 	}
 
-	systemMsg := messages[0]
-	remaining := messages[1:]
+	if len(body) == 0 {
+		// Edge case: only system message present
+		return messages
+	}
 
-	// Calculate message range to compress
+	// Final safety net: if the full conversation has no user message whatsoever,
+	// we cannot synthesize one — return as-is rather than emit an invalid request.
+	if !containsUser(body) {
+		return messages
+	}
+
+	// Desired tail size (excluding system).
 	recentCount := int(float64(cm.maxMessages) * cm.compressionRatio)
 	if recentCount < 1 {
 		recentCount = 1
 	}
-
-	// Keep recent messages
-	recent := remaining
-	middle := remaining
-	if len(remaining) > recentCount {
-		recent = remaining[len(remaining)-recentCount:]
-		middle = remaining[:len(remaining)-recentCount]
-	} else {
-		// When remaining messages are fewer than recentCount,
-		// keep all remaining as recent messages, no middle messages to summarize
-		middle = nil
+	if recentCount > len(body) {
+		recentCount = len(body)
 	}
 
-	// Summarize middle messages
-	summary := cm.summarizeMessages(middle)
+	startIdx := len(body) - recentCount
 
-	// Rebuild message list
-	compressed := []llm.Message{systemMsg}
-	if summary != "" {
-		compressed = append(compressed, llm.Message{
+	// Expand leftward so the kept window does not start with an orphan tool
+	// message (its parent assistant must be in scope).
+	startIdx = adjustStartForToolPairing(body, startIdx)
+
+	dropped := body[:startIdx]
+	recent := body[startIdx:]
+
+	// If recent window has no user message, lift the most recent user message
+	// from the dropped middle and place it just before recent. This is what
+	// the LLM gateway requires.
+	var liftedUser *llm.Message
+	if !containsUser(recent) {
+		for i := len(dropped) - 1; i >= 0; i-- {
+			if dropped[i].Role == "user" {
+				u := dropped[i]
+				liftedUser = &u
+				break
+			}
+		}
+	}
+
+	// Build compressed result.
+	out := make([]llm.Message, 0, len(recent)+3)
+	if systemMsg != nil {
+		out = append(out, *systemMsg)
+	}
+	if summary := cm.summarizeMessages(dropped); summary != "" {
+		out = append(out, llm.Message{
 			Role:    "system",
 			Content: fmt.Sprintf("[Context Summary: %s]", summary),
 		})
 	}
-	compressed = append(compressed, recent...)
+	if liftedUser != nil {
+		out = append(out, *liftedUser)
+	}
+	out = append(out, recent...)
 
-	return compressed
+	// Defensive post-check (should not happen given the lift above, but the
+	// safety net keeps us from ever shipping an invalid request).
+	if !containsUser(out) {
+		return messages
+	}
+
+	return out
+}
+
+// adjustStartForToolPairing moves startIdx left until body[startIdx] is not a
+// role=tool message. A role=tool message must be preceded by its parent
+// assistant message in the same slice, otherwise the LLM API rejects the
+// payload (orphan tool result).
+//
+// In practice we step the boundary left past any leading tool messages, then
+// past the assistant message that owns them — so the kept window starts on a
+// clean turn boundary.
+func adjustStartForToolPairing(body []llm.Message, startIdx int) int {
+	if startIdx <= 0 {
+		return 0
+	}
+	// Walk left while the boundary is a tool message.
+	for startIdx > 0 && body[startIdx].Role == "tool" {
+		startIdx--
+	}
+	// If we landed on an assistant message that has tool_calls, also include
+	// the assistant itself (it should already be at startIdx). If somehow the
+	// assistant lives further left (e.g. interleaving), step left until we
+	// find it. Safe upper bound: stop at 0.
+	if startIdx > 0 && body[startIdx].Role == "tool" {
+		// Should not happen given the loop above, but defensive.
+		startIdx = 0
+	}
+	return startIdx
+}
+
+func containsUser(msgs []llm.Message) bool {
+	for _, m := range msgs {
+		if m.Role == "user" {
+			return true
+		}
+	}
+	return false
 }
 
 // summarizeMessages summarizes messages

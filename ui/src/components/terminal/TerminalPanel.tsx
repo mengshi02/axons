@@ -10,6 +10,104 @@ import type { PanelComponentProps } from '../../lib/panelRegistry';
 import { useAppState } from '../../hooks/useAppState';
 import { useTranslation } from 'react-i18next';
 
+// ═══════════════════════════════════════════════════════════════
+//  IDE 框架能力：getXtermScaledDimensions
+//
+//  IDE 的终端 resize 不依赖 fitAddon.proposeDimensions()
+//  （该函数读 DOM computedStyle，在快速拖拽时有滞后），
+//  而是用 xterm 内部 renderer 的 cell 尺寸 + 容器像素尺寸
+//  直接算出精确的 cols/rows。
+//
+//  来源：vs/workbench/contrib/terminal/browser/xterm/xtermTerminal.ts
+//        getXtermScaledDimensions()
+// ═══════════════════════════════════════════════════════════════
+
+/** xterm 内部 renderer 尺寸接口（最小所需字段） */
+interface XtermCellDimensions {
+  css: {
+    cell: {
+      width: number;
+      height: number;
+    };
+  };
+}
+
+/**
+ * 获取 xterm renderer 的 cell 像素尺寸。
+ * 使用 xterm 内部 _core._renderService.dimensions，与 FitAddon.proposeDimensions()
+ * 内部读取的是同一数据源，但此函数不读 DOM computedStyle——
+ * 因此在 drag 期间容器 CSS height 已变但 DOM 测量滞后时，仍能得到精确的 cell 尺寸。
+ */
+function getXtermCellDimensions(xterm: XTerm): XtermCellDimensions | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const core = (xterm as any)._core;
+  if (!core?._renderService?.dimensions) return null;
+  const dims = core._renderService.dimensions;
+  if (dims.css.cell.width === 0 || dims.css.cell.height === 0) return null;
+  return dims;
+}
+
+/**
+ * 获取 xterm 容器（.xterm-container）的可用像素尺寸。
+ * 返回 { width, height } 或 null（容器不存在时）。
+ *
+ * 算法与 FitAddon.proposeDimensions() 一致：
+ *   - 读 parentElement 的 computed width/height
+ *   - 减去 xterm element 的 padding
+ *   - 减去滚动条宽度（有 scrollback 时）
+ * 但我们直接用 clientWidth/clientHeight 代替 getComputedStyle，
+ * 避免浏览器 layout thrashing。
+ */
+function getTerminalContainerPixelSize(xterm: XTerm): { width: number; height: number } | null {
+  const el = xterm.element;
+  if (!el || !el.parentElement) return null;
+
+  const parent = el.parentElement;
+  const parentWidth = parent.clientWidth;
+  const parentHeight = parent.clientHeight;
+  if (parentWidth <= 0 || parentHeight <= 0) return null;
+
+  // xterm element 的 padding（FitAddon 也会减去）
+  const style = window.getComputedStyle(el);
+  const padTop = parseInt(style.paddingTop) || 0;
+  const padBottom = parseInt(style.paddingBottom) || 0;
+  const padLeft = parseInt(style.paddingLeft) || 0;
+  const padRight = parseInt(style.paddingRight) || 0;
+
+  // 滚动条宽度（与 FitAddon 逻辑一致）
+  const scrollbarWidth = xterm.options.scrollback === 0
+    ? 0
+    : 14; // ViewportConstants.DEFAULT_SCROLL_BAR_WIDTH
+
+  const availableWidth = parentWidth - padLeft - padRight - scrollbarWidth;
+  const availableHeight = parentHeight - padTop - padBottom;
+
+  if (availableWidth <= 0 || availableHeight <= 0) return null;
+  return { width: availableWidth, height: availableHeight };
+}
+
+/**
+ * IDE getXtermScaledDimensions：
+ *   基于 xterm renderer 的 cell 尺寸 + 容器可用像素尺寸，
+ *   直接算出精确的 { cols, rows }。
+ *
+ * 关键优势：不需要 fitAddon.proposeDimensions() 读 DOM computedStyle
+ * （在快速拖拽时 computedStyle 有滞后），而是用 clientWidth/clientHeight
+ * （同步反映 CSS height 变化）+ renderer 的 cell 尺寸（稳定的，不随容器大小变）。
+ */
+function getXtermScaledDimensions(xterm: XTerm): { cols: number; rows: number } | null {
+  const cellDims = getXtermCellDimensions(xterm);
+  if (!cellDims) return null;
+
+  const containerSize = getTerminalContainerPixelSize(xterm);
+  if (!containerSize) return null;
+
+  const cols = Math.max(2, Math.floor(containerSize.width / cellDims.css.cell.width));
+  const rows = Math.max(1, Math.floor(containerSize.height / cellDims.css.cell.height));
+
+  return { cols, rows };
+}
+
 interface TerminalSession {
   id: string;
   pid: number;
@@ -97,6 +195,9 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
   const dragStartY = useRef(0);
   const dragStartHeight = useRef(320);
   const pendingHeightRef = useRef(320);
+  // drag 结束时设为 true，让 panelHeight useEffect 知道本次 height 变化来自
+  // drag mouseup，跳过自己的 fit（由 colsDebounceTimer 统一处理，避免两次 fit）。
+  const heightFromDragRef = useRef(false);
   // Always up-to-date ref for activeTabId — safe to read inside event handler
   // closures without stale-closure issues.
   const activeTabIdRef = useRef<string | null>(null);
@@ -174,6 +275,11 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       scrollback: 10000,
       convertEol: true, // Convert \n to \r\n for proper line endings
       scrollOnUserInput: true, // Auto-scroll to bottom on user input
+      // resize 路径不能有平滑动画——否则 drag 期间每次 xterm.resize() 都触发 125ms
+      // 动画，下一帧 rows 又变，动画被打断重启，导致滚动条持续抖动。
+      smoothScrollDuration: 0,
+      // WebGL 启用后，对可能与下一格重叠的字形做保守缩放，CJK / Powerline 字符更紧凑
+      rescaleOverlappingGlyphs: true,
     });
 
     // Load addons
@@ -351,16 +457,21 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
         // In alternate buffer (full-screen TUI like top/vim), don't force
         // scrollToBottom — the program manages its own cursor position.
         const isAltBuffer = currentInstance.xterm.buffer.active.type === 'alternate';
+        // 阅读位置（粘性滚动条）。这是 axons 之前"滚动条总被还原"的根因。
+        const buf = currentInstance.xterm.buffer.active;
+        const wasAtBottom = buf.viewportY >= buf.baseY;
         currentInstance.xterm.write(msg.data, () => {
-          if (!isAltBuffer) currentInstance.xterm.scrollToBottom();
+          if (!isAltBuffer && wasAtBottom) currentInstance.xterm.scrollToBottom();
         });
         // Update sequence tracking
         if (msg.seq) lastSeqRef.current.set(tabId, msg.seq);
       } else if (msg.type === 'replay' && currentInstance?.xterm) {
         // Replayed historical output from server
         const isAltBuffer = currentInstance.xterm.buffer.active.type === 'alternate';
+        const buf = currentInstance.xterm.buffer.active;
+        const wasAtBottom = buf.viewportY >= buf.baseY;
         currentInstance.xterm.write(msg.data, () => {
-          if (!isAltBuffer) currentInstance.xterm.scrollToBottom();
+          if (!isAltBuffer && wasAtBottom) currentInstance.xterm.scrollToBottom();
         });
       } else if (msg.type === 'sync') {
         // Server sent current sequence number after replay
@@ -459,93 +570,136 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
     }
   }, [projectName, tabs]);
 
-  // Fit terminal on resize (both window and container resize)
+  // IDE TerminalInstance.layout(width, height) 策略：
+  // resize 完全由框架用精确像素尺寸驱动，不依赖 fitAddon.fit()。
+  //
+  // IDE 的做法：
+  //   - Panel sash / window resize → SplitView.layout(size) →
+  //     view.layout(size) → instance.layout({width, height}) →
+  //     _evaluateColsAndRows(w, h) → getXtermScaledDimensions →
+  //     _resizeDebouncer.resize(cols, rows)
+  //   - 没有 ResizeObserver 监听面板容器本身
+  //
+  // axons 等价做法：
+  //   - window.resize → 用 getXtermScaledDimensions 算精确 cols/rows → resize
+  //   - ResizeObserver 观察 xterm 的 screen 元素（.xterm-screen）：
+  //     该元素只有在 xterm.resize() 真正完成后才改变尺寸，
+  //     不会被 panel height 的 CSS 修改误触发
+  //   - drag 期间两条路径都不触发（isDraggingRef 守卫 + screen 元素不变）
   useEffect(() => {
-    const handleResize = () => {
-      // Use active tab's instance instead of refs
-      const activeInstance = terminalInstancesRef.current.get(activeTabId || '');
-      if (activeInstance?.fitAddon && activeInstance?.xterm) {
-        const xterm = activeInstance.xterm;
-        // Remember scroll position before fit
-        const wasAtBottom = xterm.buffer.active.viewportY >= xterm.buffer.active.baseY - xterm.rows;
-        try {
-          activeInstance.fitAddon.fit();
-
-          // Send resize to backend
-          if (activeInstance.ws && activeInstance.ws.readyState === WebSocket.OPEN) {
-            activeInstance.ws.send(JSON.stringify({
-              type: 'resize',
-              cols: xterm.cols,
-              rows: xterm.rows,
-            }));
-          }
-
-          // Keep content pinned to bottom if user was already there
-          if (wasAtBottom) {
-            xterm.scrollToBottom();
-          }
-        } catch (e) {
-          // Ignore fit errors during resize
+    const doResize = () => {
+      const ai = terminalInstancesRef.current.get(activeTabId || '');
+      if (!ai?.xterm) return;
+      const xterm = ai.xterm;
+      const distFromBottom = xterm.buffer.active.baseY - xterm.buffer.active.viewportY;
+      try {
+        // IDE 策略：用精确像素尺寸算 cols/rows，直接 resize
+        const dims = getXtermScaledDimensions(xterm);
+        if (!dims) return;
+        if (dims.cols !== xterm.cols || dims.rows !== xterm.rows) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const core = (xterm as any)._core;
+          core?._renderService?.clear();
+          xterm.resize(dims.cols, dims.rows);
         }
+        if (ai.ws?.readyState === WebSocket.OPEN) {
+          ai.ws.send(JSON.stringify({ type: 'resize', cols: xterm.cols, rows: xterm.rows }));
+        }
+        if (distFromBottom === 0) xterm.scrollToBottom();
+      } catch { /* ignore */ }
+    };
+
+    // window.resize：Wails 应用窗口大小变化（drag 期间跳过）
+    const onWindowResize = () => {
+      if (isDraggingRef.current) return;
+      doResize();
+    };
+    window.addEventListener('resize', onWindowResize);
+
+    // ResizeObserver 观察 xterm screen 元素（不是 panelRef）。
+    // .xterm-screen 只在 xterm 内部 renderer 完成 resize 后才改尺寸，
+    // 因此 drag 期间改 panel CSS height 不会误触发这里。
+    // 用于捕获侧边栏开合等导致终端容器真实宽度变化的场景。
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    let observedEl: Element | null = null;
+    const resizeObserver = new ResizeObserver(() => {
+      if (isDraggingRef.current) return;
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => { resizeTimer = null; doResize(); }, 100);
+    });
+
+    const startObserving = () => {
+      const ai = terminalInstancesRef.current.get(activeTabId || '');
+      const screenEl = ai?.xterm?.element?.querySelector('.xterm-screen');
+      if (screenEl && screenEl !== observedEl) {
+        resizeObserver.disconnect();
+        observedEl = screenEl;
+        resizeObserver.observe(screenEl);
       }
     };
 
-    // Listen to window resize
-    window.addEventListener('resize', handleResize);
-
-    // Use ResizeObserver to monitor container size changes (e.g., when side panel opens/closes).
-    // Debounced to avoid heavy fitAddon.fit() calls during rapid size changes.
-    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-    const resizeObserver = new ResizeObserver(() => {
-      if (isDraggingRef.current) return; // skip during drag — mouseup handles the final fit
-      if (resizeTimer) clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
-        resizeTimer = null;
-        handleResize();
-      }, 100);
-    });
-
-    if (panelRef.current) {
-      resizeObserver.observe(panelRef.current);
-    }
+    // xterm 可能还未 open，轮询直到 screen 元素出现
+    const pollTimer = setInterval(startObserving, 200);
+    startObserving();
 
     return () => {
-      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('resize', onWindowResize);
       resizeObserver.disconnect();
+      clearInterval(pollTimer);
       if (resizeTimer) { clearTimeout(resizeTimer); resizeTimer = null; }
     };
   }, [activeTabId]);
 
-  // Fit terminal on fullscreen/height change
+  // IDE TerminalInstance.layout(width, height) 模式：
+  // 用精确像素尺寸直接算出 cols/rows，调 xterm.resize()，
+  // 而不是 fitAddon.fit()（内部读 DOM computedStyle，有滞后）。
+  //
+  // 触发场景：isFullscreen 切换、panelHeight state 变化（非 drag 来源）。
   useEffect(() => {
-    // Use active tab's fitAddon instead of the ref
-    const activeInstance = terminalInstancesRef.current.get(activeTabId || '');
-    if (activeInstance?.fitAddon && activeInstance?.xterm) {
-      const xterm = activeInstance.xterm;
-      // Remember scroll position before fit
-      const wasAtBottom = xterm.buffer.active.viewportY >= xterm.buffer.active.baseY - xterm.rows;
-      setTimeout(() => {
-        try {
-          activeInstance.fitAddon.fit();
-
-          // Send resize to backend
-          if (activeInstance.ws?.readyState === WebSocket.OPEN) {
-            activeInstance.ws.send(JSON.stringify({
-              type: 'resize',
-              cols: xterm.cols,
-              rows: xterm.rows,
-            }));
-          }
-
-          // Keep content pinned to bottom if user was already there
-          if (wasAtBottom) {
-            xterm.scrollToBottom();
-          }
-        } catch (e) {
-          // Ignore fit errors
-        }
-      }, 100);
+    // 如果本次 panelHeight 变化来自 drag mouseup，跳过此处的 fit。
+    // drag 结束后 cols resize 由 handleMouseUp 内的 flushResize 统一处理，
+    // 避免两个路径几乎同时调用 xterm.resize() 导致滚动条抖动。
+    if (heightFromDragRef.current) {
+      heightFromDragRef.current = false;
+      return;
     }
+    const activeInstance = terminalInstancesRef.current.get(activeTabId || '');
+    if (!activeInstance?.xterm) return;
+
+    const xterm = activeInstance.xterm;
+    const distFromBottom = xterm.buffer.active.baseY - xterm.buffer.active.viewportY;
+
+    setTimeout(() => {
+      try {
+        // IDE 策略：先算精确 cols/rows，再调 xterm.resize()
+        const dims = getXtermScaledDimensions(xterm);
+        if (!dims) return;
+
+        // 仅在尺寸真的变化时才 resize（避免无谓的 reflow）
+        if (dims.cols !== xterm.cols || dims.rows !== xterm.rows) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const core = (xterm as any)._core;
+          core?._renderService?.clear();
+          xterm.resize(dims.cols, dims.rows);
+        }
+
+        // Send resize to backend
+        if (activeInstance.ws?.readyState === WebSocket.OPEN) {
+          activeInstance.ws.send(JSON.stringify({
+            type: 'resize',
+            cols: xterm.cols,
+            rows: xterm.rows,
+          }));
+        }
+
+        // 只有用户 fit 前就贴底，才在 fit 后恢复到底部
+        if (distFromBottom === 0) {
+          xterm.scrollToBottom();
+        }
+      } catch (e) {
+        // Ignore resize errors
+      }
+    }, 100);
   }, [isFullscreen, panelHeight, activeTabId]);
 
   // Update terminal theme when theme changes
@@ -574,20 +728,24 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
 
   // Handle panel drag resize.
   //
-  // Mirrors VS Code's TerminalResizeDebouncer strategy:
-  //   - rows: updated immediately on every mousemove frame (cheap — just
-  //     extends the viewport into the scrollback buffer, no reflow needed).
-  //     This makes new lines appear at the top in real-time while the bottom
-  //     content stays absolutely still.
-  //   - cols: debounced 100 ms after drag ends (expensive — triggers full
-  //     text-reflow across all lines).
+  //   - buffer.normal.length < 200（小 buffer）：立即 resize cols+rows
+  //   - buffer.normal.length >= 200（大 buffer）：
+  //       rows 立即更新（cheap，只扩展 viewport 到 scrollback，不触发 reflow）
+  //       cols debounce 100ms（expensive，触发全文本 reflow）
+  //   - 不可见时：通过 requestIdleCallback 延迟执行
+  //   - flush()：mouseup 时强制立即同步最终 cols+rows
   //
-  // Computing new rows without fitAddon: derive cell height from the xterm
-  // canvas, then rows = floor(containerHeight / cellHeight).
+  // smoothScrollDuration 已设为 0，resize 路径不再触发平滑滚动动画。
 
   useEffect(() => {
-    let colsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-    let rafId: number | null = null;
+    const START_DEBOUNCING_THRESHOLD = 200; // buffer.normal.length 阈值
+    const DEBOUNCE_RESIZE_X_DELAY = 100;    // cols debounce 延迟 ms
+
+    let latestCols = 0;
+    let latestRows = 0;
+    let resizeXJobId: number | null = null;   // requestIdleCallback id
+    let resizeYJobId: number | null = null;   // requestIdleCallback id
+    let debounceXTimer: ReturnType<typeof setTimeout> | null = null;
 
     const sendResize = (ws: WebSocket | null, xterm: XTerm) => {
       if (ws?.readyState === WebSocket.OPEN) {
@@ -595,16 +753,112 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       }
     };
 
+    // 移植 _resizeBothCallback
+    // resizeBoth 用于 flush 和小 buffer 立即路径——完整 resize 后清除 CSS 拉伸
+    const resizeBoth = (cols: number, rows: number) => {
+      const ai = terminalInstancesRef.current.get(activeTabIdRef.current || '');
+      if (!ai?.xterm) return;
+      const buf = ai.xterm.buffer.active;
+      const distFromBottom = buf.baseY - buf.viewportY;
+      ai.xterm.resize(cols, rows);
+      sendResize(ai.ws, ai.xterm);
+      if (distFromBottom === 0) ai.xterm.scrollToBottom();
+    };
+
+    // 移植 _resizeXCallback
+    const resizeX = (cols: number) => {
+      const ai = terminalInstancesRef.current.get(activeTabIdRef.current || '');
+      if (!ai?.xterm) return;
+      const buf = ai.xterm.buffer.active;
+      const distFromBottom = buf.baseY - buf.viewportY;
+      ai.xterm.resize(cols, ai.xterm.rows);
+      sendResize(ai.ws, ai.xterm);
+      if (distFromBottom === 0) ai.xterm.scrollToBottom();
+    };
+
+    // 移植 _resizeYCallback
+    // IDE 策略：rows resize 时用 CSS 拉伸 .xterm-viewport 和 .xterm-screen
+    // 填满容器剩余像素（不足一行的高度），使滚动条自然拉伸不抖动。
+    const resizeY = (rows: number) => {
+      const ai = terminalInstancesRef.current.get(activeTabIdRef.current || '');
+      if (!ai?.xterm) return;
+      ai.xterm.resize(ai.xterm.cols, rows);
+      sendResize(ai.ws, ai.xterm);
+    };
+
+    // 移植 TerminalResizeDebouncer.resize(cols, rows, immediate)
+    const resizeDebounced = (cols: number, rows: number, immediate: boolean) => {
+      latestCols = cols;
+      latestRows = rows;
+
+      const ai = terminalInstancesRef.current.get(activeTabIdRef.current || '');
+      if (!ai?.xterm) return;
+      const bufferLength = ai.xterm.buffer.normal.length;
+
+      // immediate 或 buffer 较小：立即 resizeBoth，取消所有 pending 任务
+      if (immediate || bufferLength < START_DEBOUNCING_THRESHOLD) {
+        if (resizeXJobId !== null) { cancelIdleCallback(resizeXJobId); resizeXJobId = null; }
+        if (resizeYJobId !== null) { cancelIdleCallback(resizeYJobId); resizeYJobId = null; }
+        if (debounceXTimer !== null) { clearTimeout(debounceXTimer); debounceXTimer = null; }
+        resizeBoth(cols, rows);
+        return;
+      }
+
+      const xtermEl = ai.xterm.element;
+      const isVisible = xtermEl ? xtermEl.offsetParent !== null : true;
+      if (!isVisible) {
+        if (resizeXJobId === null) {
+          resizeXJobId = requestIdleCallback(() => {
+            resizeXJobId = null;
+            resizeX(latestCols);
+          });
+        }
+        if (resizeYJobId === null) {
+          resizeYJobId = requestIdleCallback(() => {
+            resizeYJobId = null;
+            resizeY(latestRows);
+          });
+        }
+        return;
+      }
+
+      // 正常路径：rows 立即，cols debounce 100ms
+      resizeY(rows);
+      latestCols = cols;
+      if (debounceXTimer !== null) clearTimeout(debounceXTimer);
+      debounceXTimer = setTimeout(() => {
+        debounceXTimer = null;
+        resizeX(latestCols);
+      }, DEBOUNCE_RESIZE_X_DELAY);
+    };
+
+    // 移植 TerminalResizeDebouncer.flush()：mouseup 时强制立即同步
+    const flushResize = () => {
+      if (debounceXTimer !== null) {
+        clearTimeout(debounceXTimer);
+        debounceXTimer = null;
+        resizeBoth(latestCols, latestRows);
+      }
+      if (resizeXJobId !== null) { cancelIdleCallback(resizeXJobId); resizeXJobId = null; }
+      if (resizeYJobId !== null) { cancelIdleCallback(resizeYJobId); resizeYJobId = null; }
+    };
+
+    // IDE getXtermScaledDimensions 策略：
+    // 用 xterm renderer 的 cell 尺寸 + 容器像素尺寸直接算出 cols/rows，
+    // 而不是 fitAddon.proposeDimensions() 读 DOM computedStyle
+    // （快速拖拽时 computedStyle 有滞后，导致底部行溢出/消失）。
+    const getTargetDimensions = (): { cols: number; rows: number } | null => {
+      const ai = terminalInstancesRef.current.get(activeTabIdRef.current || '');
+      if (!ai?.xterm) return null;
+      return getXtermScaledDimensions(ai.xterm);
+    };
+
+    let rafId: number | null = null;
+
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDraggingRef.current || !panelRef.current) return;
 
-      // Use delta from drag start (not absolute mouse Y) so the cursor stays
-      // anchored to the sash line throughout the drag. Using window.innerHeight
-      // - e.clientY as the new height would "snap" the panel's top edge to the
-      // cursor on the first mousemove, causing the sash to appear to jump into
-      // the header area when the click landed even 1-3px off the visual edge
-      // (the hit-area extends a few px above and below the line).
-      const deltaY = dragStartY.current - e.clientY; // upward drag => positive => bigger panel
+      const deltaY = dragStartY.current - e.clientY;
       const newHeight = Math.min(
         Math.max(dragStartHeight.current + deltaY, 200),
         window.innerHeight - 100,
@@ -612,24 +866,13 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       pendingHeightRef.current = newHeight;
       panelRef.current.style.height = `${newHeight}px`;
 
-      // Throttle to one resize per animation frame.
       if (rafId !== null) return;
       rafId = requestAnimationFrame(() => {
         rafId = null;
-        const activeInstance = terminalInstancesRef.current.get(activeTabIdRef.current || '');
-        if (!activeInstance?.xterm || !activeInstance.fitAddon) return;
-
-        // VS Code strategy: only update ROWS during drag (cheap, doesn't
-        // trigger text reflow — content stays anchored at bottom via CSS
-        // `.xterm { position:absolute; bottom:0 }`).
-        // COLS would trigger a full reflow of every scrollback line, so we
-        // keep cols fixed and let fitAddon.fit() in mouseup handle it once.
-        const dims = activeInstance.fitAddon.proposeDimensions();
-        if (!dims || !dims.rows) return;
-        if (dims.rows !== activeInstance.xterm.rows) {
-          activeInstance.xterm.resize(activeInstance.xterm.cols, dims.rows);
-        }
-        sendResize(activeInstance.ws, activeInstance.xterm);
+        const dims = getTargetDimensions();
+        if (!dims) return;
+        // immediate=false：走 TerminalResizeDebouncer 正常路径
+        resizeDebounced(dims.cols, dims.rows, false);
       });
     };
 
@@ -637,26 +880,17 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       if (!isDraggingRef.current) return;
       isDraggingRef.current = false;
       if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
-      setPanelHeight(pendingHeightRef.current);
       document.body.style.userSelect = '';
-    document.body.style.cursor = '';
+      document.body.style.cursor = '';
       document.body.classList.remove('axons-resizing');
-      // Remove the GPU compositing hint now that the drag is done so the
-      // panel no longer sits on its own layer (which can cause a visible
-      // seam against the sigma canvas above).
       if (panelRef.current) panelRef.current.style.willChange = '';
 
-      // After drag ends: debounce cols resize (expensive reflow).
-      if (colsDebounceTimer) clearTimeout(colsDebounceTimer);
-      colsDebounceTimer = setTimeout(() => {
-        colsDebounceTimer = null;
-        const activeInstance = terminalInstancesRef.current.get(activeTabIdRef.current || '');
-        if (!activeInstance?.fitAddon || !activeInstance?.xterm) return;
-        try {
-          activeInstance.fitAddon.fit();
-          sendResize(activeInstance.ws, activeInstance.xterm);
-        } catch (_e) { /* ignore */ }
-      }, 100);
+      // 移植 sash.onDidEnd → resizeDebouncer.flush()
+      flushResize();
+
+      // 同步 React state（触发 panelHeight useEffect，但我们标记跳过其 fit）
+      heightFromDragRef.current = true;
+      setPanelHeight(pendingHeightRef.current);
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -664,8 +898,10 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
-      if (colsDebounceTimer) clearTimeout(colsDebounceTimer);
       if (rafId !== null) cancelAnimationFrame(rafId);
+      if (debounceXTimer !== null) clearTimeout(debounceXTimer);
+      if (resizeXJobId !== null) cancelIdleCallback(resizeXJobId);
+      if (resizeYJobId !== null) cancelIdleCallback(resizeYJobId);
     };
   }, []); // registered once — reads activeTabId via ref, no stale closure
 
@@ -859,8 +1095,7 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
         // could briefly paint a much thicker dark band on first paint.
       }}
     >
-      {/* Drag handle — VS Code monaco-sash style.
-          A 6px transparent hit area sits at the top of the panel (inside
+      {/* A 6px transparent hit area sits at the top of the panel (inside
           the panel boundary, so it never overlaps the WebGL canvas above
           and cannot flash black on first paint). On hover, a 2px accent
           bar fades in to indicate the resize affordance. */}
@@ -998,21 +1233,26 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
                   setTimeout(() => {
                     try {
                       instance.fitAddon.fit();
-                      // Force a refresh
                       instance.xterm.refresh(0, instance.xterm.rows - 1);
-                      // Scroll to bottom
                       instance.xterm.scrollToBottom();
                     } catch (e) {
                       // Ignore fit errors
                     }
                   }, 50);
                 } else if (instance && instance.xterm.element) {
-                  // Already opened, just fit
+                  // Already opened (e.g. switching tabs), just fit.
+                  // Do NOT unconditionally scrollToBottom here — the user may
+                  // have scrolled up to read history, and switching tabs should
+                  // preserve that position. Only scroll to bottom if the terminal
+                  // was already at the bottom before the fit.
                   setTimeout(() => {
                     try {
+                      const bufBefore = instance.xterm.buffer.active;
+                      const distFromBottom = bufBefore.baseY - bufBefore.viewportY;
                       instance.fitAddon.fit();
-                      // Scroll to bottom
-                      instance.xterm.scrollToBottom();
+                      if (distFromBottom === 0) {
+                        instance.xterm.scrollToBottom();
+                      }
                     } catch (e) {
                       // Ignore
                     }

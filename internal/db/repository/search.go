@@ -23,6 +23,14 @@ type FTS5SearchResult struct {
 
 // FTS5Search performs full-text search using FTS5 with BM25 ranking.
 func (r *Repository) FTS5Search(query string, limit int) ([]*FTS5SearchResult, error) {
+	// Sanitize the user-supplied query so that it is safe to feed into the
+	// FTS5 MATCH operator. Without this, characters like '=', ':', '*', '"',
+	// '(', ')' may produce "fts5: syntax error near ..." failures whenever
+	// the LLM (or any caller) passes a free-form string such as `name = "x"`.
+	safeQuery := sanitizeFTS5Query(query)
+	if safeQuery == "" {
+		return nil, nil
+	}
 	// Use FTS5 MATCH with BM25 scoring
 	// BM25 returns negative scores, so we negate for ranking (higher is better)
 	rows, err := r.db.Query(`
@@ -41,7 +49,7 @@ func (r *Repository) FTS5Search(query string, limit int) ([]*FTS5SearchResult, e
 		WHERE nodes_fts MATCH ?
 		ORDER BY bm25_score DESC
 		LIMIT ?
-	`, query, limit)
+	`, safeQuery, limit)
 	if err != nil {
 		return nil, fmt.Errorf("fts5 search failed: %w", err)
 	}
@@ -77,6 +85,11 @@ func (r *Repository) FTS5Search(query string, limit int) ([]*FTS5SearchResult, e
 
 // FTS5SearchWithFilter performs FTS5 search with additional filters.
 func (r *Repository) FTS5SearchWithFilter(query string, kind string, filePattern string, limit int) ([]*FTS5SearchResult, error) {
+	// Sanitize the FTS5 MATCH expression — see FTS5Search for rationale.
+	safeQuery := sanitizeFTS5Query(query)
+	if safeQuery == "" {
+		return nil, nil
+	}
 	// Build query with filters
 	sqlQuery := `
 		SELECT 
@@ -93,7 +106,7 @@ func (r *Repository) FTS5SearchWithFilter(query string, kind string, filePattern
 		JOIN nodes n ON fts.rowid = n.id
 		WHERE nodes_fts MATCH ?
 	`
-	args := []interface{}{query}
+	args := []interface{}{safeQuery}
 
 	if kind != "" {
 		sqlQuery += " AND n.kind = ?"

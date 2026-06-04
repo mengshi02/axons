@@ -1,16 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   X, Send, Loader2, Sparkles, MessageSquare, Search,
-  Code, FileText, Wrench, ChevronDown, Plus, AlertTriangle,
+  Code, FileText, ChevronDown, Plus, AlertTriangle,
   Layers, ShieldCheck, GitBranch, Code2, Bot, Trash2,
-  History, PenSquare, Brain, CheckCircle2, Image,
+  History, PenSquare, Brain, Image,
   Database, Terminal, TestTube2, Cloud, Cpu, Globe, FlaskConical,
   Microscope, Zap, Package, Puzzle, BookOpen, Network, Wand2,
   Fingerprint, Lock, Workflow, BarChart3, Settings, RefreshCw,
-  Compass, Square,
+  Compass, Square, Wrench,
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -25,6 +23,9 @@ import {
   type AgentStreamChunk,
 } from '../llm';
 import { ChangeList } from './ChangeList';
+import { ChatComposer, type ChatComposerHandle } from './chat/ChatComposer';
+import { MessageItem } from './chat/MessageItem';
+import { invalidateMarkdown } from './chat/markdownCache';
 
 /**
  * Filter out context markers from message content for display
@@ -156,7 +157,11 @@ export function RightPanel({ onClose }: PanelComponentProps) {
   const [deleteConvId, setDeleteConvId] = useState<string | null>(null);
   const [changeListRefreshKey, setChangeListRefreshKey] = useState(0); // Used to trigger ChangeList refresh
 
-  const [input, setInput] = useState('');
+  // Input state is held inside ChatComposer (self-managed) to avoid re-rendering
+  // the whole chat panel on every keystroke. We only track an "isEmpty" boolean
+  // here so the Send button's disabled state can flip.
+  const composerRef = useRef<ChatComposerHandle>(null);
+  const [composerEmpty, setComposerEmpty] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   // Semantic search state
@@ -176,7 +181,6 @@ export function RightPanel({ onClose }: PanelComponentProps) {
   const [agentDropdownOpen, setAgentDropdownOpen] = useState(false);
   const [showAgentManager, setShowAgentManager] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
 
@@ -331,13 +335,6 @@ export function RightPanel({ onClose }: PanelComponentProps) {
     }
   }, [isPanelVisible]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
-      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 200)}px`;
-    }
-  }, [input]);
-
   // Close dropdown on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -381,6 +378,11 @@ export function RightPanel({ onClose }: PanelComponentProps) {
     const convId = deleteConvId;
     setDeleteConvId(null);
     setConversations(prev => {
+      const target = prev.find(c => c.id === convId);
+      // Drop cached markdown renderings for messages of the deleted conversation.
+      if (target) {
+        target.messages.forEach(m => invalidateMarkdown(m.id));
+      }
       const updated = prev.filter(c => c.id !== convId);
       if (convId === currentConvId) {
         if (updated.length > 0) {
@@ -432,7 +434,9 @@ export function RightPanel({ onClose }: PanelComponentProps) {
   };
 
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+    const rawInput = composerRef.current?.getValue() ?? '';
+    const trimmedInput = rawInput.trim();
+    if (!trimmedInput || isLoading) return;
 
     // Ensure there's a current conversation
     let convId = currentConvId;
@@ -447,13 +451,13 @@ export function RightPanel({ onClose }: PanelComponentProps) {
       id: Date.now().toString(),
       role: 'user',
       type: 'text',
-      content: input.trim(),
+      content: trimmedInput,
       timestamp: new Date(),
       images: snapshotImages.length > 0 ? snapshotImages : undefined,
     };
 
     // Text to send to agent
-    const agentMessage = input.trim();
+    const agentMessage = trimmedInput;
 
     // Update conversation title from first user message
     setConversations(prev => prev.map(c => {
@@ -469,7 +473,8 @@ export function RightPanel({ onClose }: PanelComponentProps) {
       return c;
     }));
 
-    setInput('');
+    composerRef.current?.clear();
+    setComposerEmpty(true);
     setAttachedImages([]);
     setIsLoading(true);
 
@@ -716,23 +721,49 @@ export function RightPanel({ onClose }: PanelComponentProps) {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    // 检查是否正在输入法组合状态（如中文输入法正在输入拼音）
-    // 方案：使用 keyCode === 229 检测 IME 组合中的按键
-    // W3C 标准规定：IME 处于组合状态时，keydown 事件的 keyCode 为 229
-    // 这比 nativeEvent.isComposing 和 compositionstart/compositionend 更可靠，
-    // 因为某些 WebView（如 macOS WKWebView/Wails）中 isComposing 属性不可靠，
-    // compositionstart 事件可能不触发（尤其是应用刚启动时）。
-    if (e.key === 'Enter' && !e.shiftKey && e.keyCode !== 229) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
   // RightPanel is always rendered when open (App.tsx controls visibility via panelRegistry)
   const selectedNodeName = selectedNode && graph
     ? graph.nodes.find(n => n.id === selectedNode)?.properties.name
     : undefined;
+
+  // Stable callbacks for MessageItem props (referential equality matters for memo).
+  const handleImageClick = useCallback((src: string) => setLightboxSrc(src), []);
+
+  // Refs to read latest state inside stable callbacks (avoid recreating callbacks per render).
+  const conversationsRef = useRef(conversations);
+  conversationsRef.current = conversations;
+  const currentConvIdRef = useRef(currentConvId);
+  currentConvIdRef.current = currentConvId;
+
+  const handleRetry = useCallback((errorMessageId: string) => {
+    const conv = conversationsRef.current.find(c => c.id === currentConvIdRef.current);
+    if (!conv) return;
+    const errorIdx = conv.messages.findIndex(m => m.id === errorMessageId);
+    const lastUserMsg = conv.messages
+      .slice(0, errorIdx)
+      .reverse()
+      .find(m => m.role === 'user');
+    if (lastUserMsg) {
+      composerRef.current?.setValue(lastUserMsg.content);
+      composerRef.current?.focus();
+      setComposerEmpty(lastUserMsg.content.trim().length === 0);
+    }
+  }, []);
+
+  // Identify the streaming message (the assistant text message currently being built):
+  // it's the last assistant text message while isLoading. Only this one renders without cache.
+  let streamingMessageId: string | null = null;
+  if (isLoading) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === 'assistant' && m.type === 'text') {
+        streamingMessageId = m.id;
+        break;
+      }
+      // Stop if we hit a user message — no streaming text yet
+      if (m.role === 'user') break;
+    }
+  }
 
   return (
     <div
@@ -924,115 +955,14 @@ export function RightPanel({ onClose }: PanelComponentProps) {
               )}
 
               {messages.map(message => (
-                <div key={message.id} className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
-
-                  {/* Tool message */}
-                  {message.type === 'tool' && (
-                    <div className={`max-w-[85%] text-xs p-2 rounded border ${message.toolStatus === 'running'
-                      ? 'bg-accent/5 border-accent/30'
-                      : message.toolStatus === 'error'
-                        ? 'bg-red-500/5 border-red-500/20'
-                        : 'bg-surface border-border-subtle'
-                      }`}>
-                      <div className="flex items-center gap-1.5">
-                        {message.toolStatus === 'running' ? (
-                          <Loader2 className="w-3 h-3 animate-spin text-accent" />
-                        ) : message.toolStatus === 'error' ? (
-                          <AlertTriangle className="w-3 h-3 text-red-400" />
-                        ) : (
-                          <CheckCircle2 className="w-3 h-3 text-green-400" />
-                        )}
-                        <Wrench className="w-3 h-3 text-accent" />
-                        <span className="font-medium text-accent">{message.toolName}</span>
-                        {message.toolStatus === 'running' && (
-                          <span className="text-text-muted">running...</span>
-                        )}
-                        {message.toolStatus !== 'running' && message.toolDurationMs !== undefined && (
-                          <span className="text-text-muted ml-auto">
-                            {message.toolDurationMs < 1000 ? `${message.toolDurationMs}ms` : `${(message.toolDurationMs / 1000).toFixed(1)}s`}
-                          </span>
-                        )}
-                      </div>
-                      {message.toolInput && (
-                        <pre className="mt-1 text-text-muted overflow-hidden text-ellipsis">
-                          {JSON.stringify(message.toolInput).slice(0, 100)}
-                        </pre>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Text message (user or assistant) */}
-                  {message.type === 'text' && (
-                    <>
-                      <div className={`max-w-[85%] overflow-hidden rounded-lg px-3 py-2 ${message.role === 'user'
-                        ? 'bg-accent text-white user-msg-bubble'
-                        : message.errorType
-                          ? 'bg-red-500/10 text-red-400 border border-red-500/20'
-                          : 'bg-elevated text-text-primary'
-                        }`}>
-                        {/* Error icon for error messages */}
-                        {message.errorType && (
-                          <div className="flex items-center gap-1.5 mb-1">
-                            <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
-                            <span className="text-xs font-medium text-red-400">
-                              {message.errorType === 'rate_limit' ? t('rateLimitError') :
-                                message.errorType === 'auth_error' ? t('authError') :
-                                  message.errorType === 'server_error' ? t('serverError') : t('agentError')}
-                            </span>
-                          </div>
-                        )}
-                        {/* Attached images in message bubble */}
-                        {message.images && message.images.length > 0 && (
-                          <div className="flex gap-1 mt-1.5 flex-wrap">
-                            {message.images.map((src, i) => (
-                              <img
-                                key={i}
-                                src={src}
-                                alt={`image ${i + 1}`}
-                                className="w-4 h-4 object-cover rounded cursor-zoom-in hover:opacity-80 transition-opacity"
-                                onClick={() => setLightboxSrc(src)}
-                              />
-                            ))}
-                          </div>
-                        )}
-                        {message.content && (
-                          <div className="text-sm prose prose-invert prose-sm max-w-none break-words">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {filterContextMarker(message.content)}
-                            </ReactMarkdown>
-                          </div>
-                        )}
-                        {/* Retry button for retryable errors */}
-                        {message.retryable && (
-                          <button
-                            onClick={() => {
-                              // Find the last user message before this error
-                              const conv = conversations.find(c => c.id === currentConvId);
-                              if (!conv) return;
-                              const errorIdx = conv.messages.findIndex(m => m.id === message.id);
-                              const lastUserMsg = conv.messages
-                                .slice(0, errorIdx)
-                                .reverse()
-                                .find(m => m.role === 'user');
-                              if (lastUserMsg) {
-                                setInput(lastUserMsg.content);
-                              }
-                            }}
-                            className="mt-2 flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors"
-                          >
-                            <RefreshCw className="w-3 h-3" />
-                            重试
-                          </button>
-                        )}
-                      </div>
-                    </>
-                  )}
-
-                  {/* Timestamp */}
-                  <span className="text-[10px] text-text-muted mt-0.5 px-1">
-                    {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
+                <MessageItem
+                  key={message.id}
+                  message={message}
+                  isStreaming={message.id === streamingMessageId}
+                  t={t}
+                  onImageClick={handleImageClick}
+                  onRetry={handleRetry}
+                />
               ))}
 
               <div ref={messagesEndRef} />
@@ -1095,11 +1025,11 @@ export function RightPanel({ onClose }: PanelComponentProps) {
                 )}
 
                 {/* Textarea */}
-                <textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
+                <ChatComposer
+                  ref={composerRef}
+                  onSubmit={() => handleSend()}
+                  onEmptyChange={setComposerEmpty}
+                  disabled={isLoading}
                   placeholder={t('placeholder')}
                   rows={3}
                   className="w-full px-3 pt-3 pb-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none"
@@ -1163,7 +1093,7 @@ export function RightPanel({ onClose }: PanelComponentProps) {
                   ) : (
                     <button
                       onClick={handleSend}
-                        disabled={!input.trim()}
+                        disabled={composerEmpty}
                         className="p-1.5 bg-accent text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent/90 transition-colors"
                       >
                         <Send className="w-3.5 h-3.5" />
