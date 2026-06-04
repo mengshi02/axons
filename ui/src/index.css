@@ -12,6 +12,13 @@ body {
   overscroll-behavior: none;
 }
 
+/* Extend to all scroll containers inside the app */
+.overflow-y-auto,
+.overflow-x-auto,
+.overflow-auto {
+  overscroll-behavior: none;
+}
+
 /* Import plugin-sdk theme.css as Single Source of Truth for CSS variables */
 @import './plugin-sdk/theme.css';
 /* Map dark: variant to .moon-theme class so it follows the app theme toggle */
