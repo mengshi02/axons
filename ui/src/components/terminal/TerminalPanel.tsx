@@ -587,25 +587,7 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
 
   useEffect(() => {
     let colsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const getCellHeight = (xterm: XTerm): number => {
-      // xterm exposes cell dimensions on the internal _core renderer.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const core = (xterm as any)._core;
-      return core?._renderService?._renderer?.value?._charSizeService?.height
-        || core?._renderService?.dimensions?.device?.cell?.height
-        || core?.viewport?._currentRowHeight
-        || 16; // fallback
-    };
-
-    const resizeRows = (xterm: XTerm, containerHeight: number) => {
-      const cellH = getCellHeight(xterm);
-      if (!cellH) return;
-      const newRows = Math.max(1, Math.floor(containerHeight / cellH));
-      if (newRows !== xterm.rows) {
-        xterm.resize(xterm.cols, newRows);
-      }
-    };
+    let rafId: number | null = null;
 
     const sendResize = (ws: WebSocket | null, xterm: XTerm) => {
       if (ws?.readyState === WebSocket.OPEN) {
@@ -613,19 +595,20 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       }
     };
 
-    // Mirror VS Code's TerminalResizeDebouncer threshold:
-    // when the normal buffer is small (< 200 lines) xterm.resize() is cheap,
-    // so we keep the real-time row update.  Once the buffer grows large the
-    // per-frame resize becomes expensive (O(buffer size)), so we skip it and
-    // let the single fitAddon.fit() call in handleMouseUp handle everything.
-    const START_DEBOUNCING_THRESHOLD = 200;
-
-    let rafId: number | null = null;
-
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDraggingRef.current || !panelRef.current) return;
 
-      const newHeight = Math.min(Math.max(window.innerHeight - e.clientY, 200), window.innerHeight - 100);
+      // Use delta from drag start (not absolute mouse Y) so the cursor stays
+      // anchored to the sash line throughout the drag. Using window.innerHeight
+      // - e.clientY as the new height would "snap" the panel's top edge to the
+      // cursor on the first mousemove, causing the sash to appear to jump into
+      // the header area when the click landed even 1-3px off the visual edge
+      // (the hit-area extends a few px above and below the line).
+      const deltaY = dragStartY.current - e.clientY; // upward drag => positive => bigger panel
+      const newHeight = Math.min(
+        Math.max(dragStartHeight.current + deltaY, 200),
+        window.innerHeight - 100,
+      );
       pendingHeightRef.current = newHeight;
       panelRef.current.style.height = `${newHeight}px`;
 
@@ -633,24 +616,19 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       if (rafId !== null) return;
       rafId = requestAnimationFrame(() => {
         rafId = null;
-        // Use ref — always current tab id, no stale-closure risk.
         const activeInstance = terminalInstancesRef.current.get(activeTabIdRef.current || '');
-        if (!activeInstance?.xterm || !panelRef.current) return;
+        if (!activeInstance?.xterm || !activeInstance.fitAddon) return;
 
-        // Skip per-frame xterm.resize() when the buffer is large — it would
-        // iterate every scrollback line on each animation frame, causing the
-        // drag to feel increasingly sluggish over time.  The final
-        // fitAddon.fit() in handleMouseUp will do one correct resize instead.
-        if (activeInstance.xterm.buffer.normal.length >= START_DEBOUNCING_THRESHOLD) return;
-
-        // Use the active tab's container via data attribute — querySelector()
-        // without a filter would return the first container which may be
-        // display:none (clientHeight=0) when it belongs to an inactive tab.
-        const container = panelRef.current.querySelector<HTMLElement>(
-          `.xterm-container[data-tab-id="${activeTabIdRef.current}"]`
-        );
-        if (!container) return;
-        resizeRows(activeInstance.xterm, container.clientHeight);
+        // VS Code strategy: only update ROWS during drag (cheap, doesn't
+        // trigger text reflow — content stays anchored at bottom via CSS
+        // `.xterm { position:absolute; bottom:0 }`).
+        // COLS would trigger a full reflow of every scrollback line, so we
+        // keep cols fixed and let fitAddon.fit() in mouseup handle it once.
+        const dims = activeInstance.fitAddon.proposeDimensions();
+        if (!dims || !dims.rows) return;
+        if (dims.rows !== activeInstance.xterm.rows) {
+          activeInstance.xterm.resize(activeInstance.xterm.cols, dims.rows);
+        }
         sendResize(activeInstance.ws, activeInstance.xterm);
       });
     };
@@ -661,14 +639,17 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
       setPanelHeight(pendingHeightRef.current);
       document.body.style.userSelect = '';
-      document.body.style.cursor = '';
+    document.body.style.cursor = '';
       document.body.classList.remove('axons-resizing');
+      // Remove the GPU compositing hint now that the drag is done so the
+      // panel no longer sits on its own layer (which can cause a visible
+      // seam against the sigma canvas above).
+      if (panelRef.current) panelRef.current.style.willChange = '';
 
       // After drag ends: debounce cols resize (expensive reflow).
       if (colsDebounceTimer) clearTimeout(colsDebounceTimer);
       colsDebounceTimer = setTimeout(() => {
         colsDebounceTimer = null;
-        // Use ref — always current tab id.
         const activeInstance = terminalInstancesRef.current.get(activeTabIdRef.current || '');
         if (!activeInstance?.fitAddon || !activeInstance?.xterm) return;
         try {
@@ -857,13 +838,44 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
   return (
     <div
       ref={panelRef}
-      className={`border-t border-border-subtle flex flex-col ${isFullscreen ? 'fixed inset-0 z-50' : 'absolute bottom-0 left-0 right-0 z-10'}`}
-      style={{ height: isFullscreen ? '100vh' : panelHeight, minHeight: isFullscreen ? undefined : 200, backgroundColor: TERMINAL_THEMES[theme].background, willChange: 'height' }}
+      className={`flex flex-col ${isFullscreen ? 'fixed inset-0 z-50' : 'absolute bottom-0 left-0 right-0 z-10'}`}
+      style={{
+        height: isFullscreen ? '100vh' : panelHeight,
+        minHeight: isFullscreen ? undefined : 200,
+        backgroundColor: TERMINAL_THEMES[theme].background,
+        // Stabilize the GPU compositing layer from the very first frame:
+        // promoting the panel to its own layer up front (via translateZ +
+        // isolation + contain) prevents the browser from creating a *new*
+        // layer boundary mid-mount against the WebGL canvas above, which
+        // was the source of the flashing black band at the sash position.
+        // Because the layer exists from frame 0 with a solid background,
+        // there is no "未绘制黑色像素" leaking through at the seam.
+        transform: isFullscreen ? undefined : 'translateZ(0)',
+        contain: isFullscreen ? undefined : 'layout paint',
+        isolation: isFullscreen ? undefined : 'isolate',
+        // NOTE: no `border-top` here — the visible sash line is rendered as
+        // an *inside* 1px div (see below). Drawing it as a border on this
+        // wrapper meant it lived on the layer boundary, where the compositor
+        // could briefly paint a much thicker dark band on first paint.
+      }}
     >
-      {/* Drag handle */}
+      {/* Drag handle — VS Code monaco-sash style.
+          A 6px transparent hit area sits at the top of the panel (inside
+          the panel boundary, so it never overlaps the WebGL canvas above
+          and cannot flash black on first paint). On hover, a 2px accent
+          bar fades in to indicate the resize affordance. */}
       {!isFullscreen && (
         <div
-          className="h-1 bg-transparent hover:bg-accent/20 cursor-row-resize transition-colors flex-shrink-0"
+          className="cursor-row-resize group"
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            height: '6px',
+            zIndex: 50,
+            background: 'transparent',
+          }}
           onMouseDown={(e) => {
             e.preventDefault();
             isDraggingRef.current = true;
@@ -873,8 +885,26 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
             document.body.style.userSelect = 'none';
             document.body.style.cursor = 'row-resize';
             document.body.classList.add('axons-resizing');
+            // `will-change: height` is added during drag only as a hint;
+            // the panel is already a stable compositing layer thanks to
+            // translateZ(0) on the wrapper, so toggling will-change no
+            // longer introduces a new layer boundary mid-interaction.
+            if (panelRef.current) panelRef.current.style.willChange = 'height';
           }}
-        />
+        >
+          {/* Hover accent bar — drawn at the very top edge of the panel. */}
+          <div
+            className="opacity-0 group-hover:opacity-100 transition-opacity bg-accent"
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: 0,
+              height: '2px',
+              pointerEvents: 'none',
+            }}
+          />
+        </div>
       )}
 
       {/* Error toast (auto-dismiss) */}

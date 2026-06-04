@@ -299,3 +299,72 @@ body.axons-resizing iframe {
 .prism-editor-wrapper .prism-code-editor {
   height: 100%;
 }
+/* ═══════════════════════════════════════════════════════════════
+   SCROLLBAR STYLES
+   WebKit browsers (Chrome/Safari/Wails) use a default scrollbar that
+   changes width and color on hover, which looks jarring in both
+   moon (dark) and sun (light) themes. We override the thumb and
+   track globally per theme so every scrollable container — whether
+   it uses scrollbar-thin or just overflow-y-auto — gets a consistent,
+   subtle scrollbar that does NOT widen or turn bright on hover.
+
+   For Firefox (scrollbar-width / scrollbar-color), see the
+   .moon-theme / .sun-theme root-level rules below.
+      ═══════════════════════════════════════════════════════════════ */
+
+/* ── Moon theme (dark) ── */
+.moon-theme ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.moon-theme ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.moon-theme ::-webkit-scrollbar-thumb {
+  background: var(--color-border-subtle);
+  border-radius: 3px;
+}
+
+.moon-theme ::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-default);
+}
+
+.moon-theme ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ── Sun theme (light) ── */
+.sun-theme ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.sun-theme ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sun-theme ::-webkit-scrollbar-thumb {
+  background: var(--color-border-subtle);
+  border-radius: 3px;
+}
+
+.sun-theme ::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-default);
+}
+
+.sun-theme ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ── Firefox (scrollbar-color + scrollbar-width) ── */
+.moon-theme {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-subtle) transparent;
+}
+
+.sun-theme {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-subtle) transparent;
+}
