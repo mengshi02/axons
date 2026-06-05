@@ -785,37 +785,54 @@ func (s *MCPServer) handleGetStats(ctx context.Context, req *mcp.CallToolRequest
 }
 
 func (s *MCPServer) handleFindDeadCode(ctx context.Context, req *mcp.CallToolRequest, args FindDeadCodeArgs) (*mcp.CallToolResult, map[string]interface{}, error) {
-	// Find nodes that have no callers - simplified dead code detection
-	// We look for function nodes with no incoming CALLS edges
-	nodes, err := s.repo.FindNodesByKind("function", 1000, 0)
+	qs := graph.NewQueryService(s.repo)
+	result, err := qs.FindDeadCode(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to find dead code: %w", err)
 	}
 
-	results := []SymbolResult{}
-	for _, node := range nodes {
-		callers, err := s.repo.FindCallers(node.ID)
-		if err != nil {
-			continue
-		}
-		// If no callers, it's potentially dead code
-		if len(callers) == 0 && node.Exported == false {
-			results = append(results, SymbolResult{
-				ID:            node.ID,
-				Name:          node.Name,
-				Kind:          string(node.Kind),
-				File:          node.File,
-				Line:          node.Line,
-				EndLine:       node.EndLine,
-				QualifiedName: node.QualifiedName,
-			})
-		}
+	type deadCodeEntry struct {
+		ID            int64  `json:"id"`
+		Name          string `json:"name"`
+		Kind          string `json:"kind"`
+		File          string `json:"file"`
+		Line          int    `json:"line"`
+		EndLine       int    `json:"end_line,omitempty"`
+		Exported      bool   `json:"exported"`
+		QualifiedName string `json:"qualified_name,omitempty"`
+	}
+
+	deadNodes := make([]deadCodeEntry, 0, len(result.DeadNodes))
+	for _, n := range result.DeadNodes {
+		deadNodes = append(deadNodes, deadCodeEntry{
+			ID:            n.ID,
+			Name:          n.Name,
+			Kind:          string(n.Kind),
+			File:          n.File,
+			Line:          n.Line,
+			EndLine:       n.EndLine,
+			QualifiedName: n.QualifiedName,
+		})
+	}
+
+	unusedExports := make([]deadCodeEntry, 0, len(result.UnusedExports))
+	for _, n := range result.UnusedExports {
+		unusedExports = append(unusedExports, deadCodeEntry{
+			ID:            n.ID,
+			Name:          n.Name,
+			Kind:          string(n.Kind),
+			File:          n.File,
+			Line:          n.Line,
+			EndLine:       n.EndLine,
+			Exported:      true,
+			QualifiedName: n.QualifiedName,
+		})
 	}
 
 	return nil, map[string]interface{}{
-		"dead_code": results,
-		"count":     len(results),
-		"message":   "Note: This is a simplified dead code detection. Results may include entry points like main().",
+		"dead_nodes":     deadNodes,
+		"unused_exports": unusedExports,
+		"count":          result.Count,
 	}, nil
 }
 
@@ -825,64 +842,46 @@ func (s *MCPServer) handleFindHotspots(ctx context.Context, req *mcp.CallToolReq
 		limit = 20
 	}
 
-	// Find functions with many callers (hotspots)
-	nodes, err := s.repo.FindNodesByKind("function", 1000, 0)
+	qs := graph.NewQueryService(s.repo)
+	hotspots, err := qs.FindHotspots(ctx, limit)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to find hotspots: %w", err)
 	}
 
-	type hotspot struct {
-		SymbolResult
-		CallCount int `json:"call_count"`
+	type hotspotInfo struct {
+		ID            int64   `json:"id"`
+		Name          string  `json:"name"`
+		Kind          string  `json:"kind"`
+		File          string  `json:"file"`
+		Line          int     `json:"line"`
+		EndLine       int     `json:"end_line,omitempty"`
+		QualifiedName string  `json:"qualified_name,omitempty"`
+		FanIn         int     `json:"fan_in"`
+		FanOut        int     `json:"fan_out"`
+		CallCount     int     `json:"call_count"`
+		Score         float64 `json:"score"`
+		Exported      bool    `json:"exported"`
 	}
 
-	hotspots := []hotspot{}
-	for _, node := range nodes {
-		callers, err := s.repo.FindCallers(node.ID)
-		if err != nil {
+	results := make([]hotspotInfo, 0, len(hotspots))
+	for _, h := range hotspots {
+		if h.Node == nil {
 			continue
 		}
-		if len(callers) > 0 {
-			hotspots = append(hotspots, hotspot{
-				SymbolResult: SymbolResult{
-					ID:            node.ID,
-					Name:          node.Name,
-					Kind:          string(node.Kind),
-					File:          node.File,
-					Line:          node.Line,
-					EndLine:       node.EndLine,
-					QualifiedName: node.QualifiedName,
-				},
-				CallCount: len(callers),
-			})
-		}
-	}
-
-	// Sort by call count descending and take top N
-	for i := 0; i < len(hotspots)-1; i++ {
-		for j := i + 1; j < len(hotspots); j++ {
-			if hotspots[j].CallCount > hotspots[i].CallCount {
-				hotspots[i], hotspots[j] = hotspots[j], hotspots[i]
-			}
-		}
-	}
-
-	if len(hotspots) > limit {
-		hotspots = hotspots[:limit]
-	}
-
-	results := make([]map[string]interface{}, len(hotspots))
-	for i, h := range hotspots {
-		results[i] = map[string]interface{}{
-			"id":             h.ID,
-			"name":           h.Name,
-			"kind":           h.Kind,
-			"file":           h.File,
-			"line":           h.Line,
-			"end_line":       h.EndLine,
-			"qualified_name": h.QualifiedName,
-			"call_count":     h.CallCount,
-		}
+		results = append(results, hotspotInfo{
+			ID:            h.Node.ID,
+			Name:          h.Node.Name,
+			Kind:          string(h.Node.Kind),
+			File:          h.Node.File,
+			Line:          h.Node.Line,
+			EndLine:       h.Node.EndLine,
+			QualifiedName: h.Node.QualifiedName,
+			FanIn:         h.FanIn,
+			FanOut:        h.FanOut,
+			CallCount:     h.CallCount,
+			Score:         h.Score,
+			Exported:      h.Node.Exported,
+		})
 	}
 
 	return nil, map[string]interface{}{

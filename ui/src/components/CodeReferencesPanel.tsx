@@ -11,6 +11,7 @@ import remarkGfm from 'remark-gfm';
 import { VirtualCodeView } from './VirtualCodeView';
 import { PrismCodeEditor } from './PrismCodeEditor';
 import { useTranslation } from 'react-i18next';
+import { MarkdownLink } from './chat/markdownCache';
 
 const NODE_TYPE_COLORS: Record<string, string> = {
   Folder: '#6366f1',
@@ -764,9 +765,9 @@ export function CodeReferencesPanel({ onClose: _onClose }: PanelComponentProps) 
                     />
                   ) : filePath.toLowerCase().endsWith('.md') && mdPreviewMode ? (
                     <div className="absolute inset-0 overflow-auto p-6 prose prose-invert prose-sm max-w-none">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {codeContent}
-                      </ReactMarkdown>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: MarkdownLink }}>
+                                {codeContent}
+                              </ReactMarkdown>
                     </div>
                     ) : (
                         <VirtualCodeView

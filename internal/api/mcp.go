@@ -768,33 +768,51 @@ func (s *MCPServer) handleGetStats() (any, error) {
 }
 
 func (s *MCPServer) handleFindDeadCode() (any, error) {
-	nodes, err := s.repo.FindNodesByKind("function", 1000, 0)
+	qs := graph.NewQueryService(s.repo)
+	result, err := qs.FindDeadCode(context.Background())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to find dead code: %w", err)
 	}
 
-	results := []map[string]any{}
-	for _, node := range nodes {
-		callers, err := s.repo.FindCallers(node.ID)
-		if err != nil {
-			continue
-		}
-		if len(callers) == 0 && !node.Exported {
-			results = append(results, map[string]any{
-				"id":             node.ID,
-				"name":           node.Name,
-				"kind":           string(node.Kind),
-				"file":           node.File,
-				"line":           node.Line,
-				"qualified_name": node.QualifiedName,
-			})
-		}
+	type deadCodeEntry struct {
+		ID            int64  `json:"id"`
+		Name          string `json:"name"`
+		Kind          string `json:"kind"`
+		File          string `json:"file"`
+		Line          int    `json:"line"`
+		Exported      bool   `json:"exported"`
+		QualifiedName string `json:"qualified_name,omitempty"`
+	}
+
+	deadNodes := make([]deadCodeEntry, 0, len(result.DeadNodes))
+	for _, n := range result.DeadNodes {
+		deadNodes = append(deadNodes, deadCodeEntry{
+			ID:            n.ID,
+			Name:          n.Name,
+			Kind:          string(n.Kind),
+			File:          n.File,
+			Line:          n.Line,
+			QualifiedName: n.QualifiedName,
+		})
+	}
+
+	unusedExports := make([]deadCodeEntry, 0, len(result.UnusedExports))
+	for _, n := range result.UnusedExports {
+		unusedExports = append(unusedExports, deadCodeEntry{
+			ID:            n.ID,
+			Name:          n.Name,
+			Kind:          string(n.Kind),
+			File:          n.File,
+			Line:          n.Line,
+			Exported:      true,
+			QualifiedName: n.QualifiedName,
+		})
 	}
 
 	return map[string]any{
-		"dead_code": results,
-		"count":     len(results),
-		"message":   "Note: This may include entry points like main()",
+		"dead_nodes":     deadNodes,
+		"unused_exports": unusedExports,
+		"count":          result.Count,
 	}, nil
 }
 
@@ -804,61 +822,44 @@ func (s *MCPServer) handleFindHotspots(args map[string]any) (any, error) {
 		limit = int(l)
 	}
 
-	nodes, err := s.repo.FindNodesByKind("function", 1000, 0)
+	qs := graph.NewQueryService(s.repo)
+	hotspots, err := qs.FindHotspots(context.Background(), limit)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to find hotspots: %w", err)
 	}
 
-	type hotspot struct {
-		ID        int64
-		Name      string
-		Kind      string
-		File      string
-		Line      int
-		CallCount int
+	type hotspotInfo struct {
+		ID            int64   `json:"id"`
+		Name          string  `json:"name"`
+		Kind          string  `json:"kind"`
+		File          string  `json:"file"`
+		Line          int     `json:"line"`
+		QualifiedName string  `json:"qualified_name,omitempty"`
+		FanIn         int     `json:"fan_in"`
+		FanOut        int     `json:"fan_out"`
+		CallCount     int     `json:"call_count"`
+		Score         float64 `json:"score"`
+		Exported      bool    `json:"exported"`
 	}
 
-	hotspots := []hotspot{}
-	for _, node := range nodes {
-		callers, err := s.repo.FindCallers(node.ID)
-		if err != nil {
+	results := make([]hotspotInfo, 0, len(hotspots))
+	for _, h := range hotspots {
+		if h.Node == nil {
 			continue
 		}
-		if len(callers) > 0 {
-			hotspots = append(hotspots, hotspot{
-				ID:        node.ID,
-				Name:      node.Name,
-				Kind:      string(node.Kind),
-				File:      node.File,
-				Line:      node.Line,
-				CallCount: len(callers),
-			})
-		}
-	}
-
-	// Sort by call count descending
-	for i := 0; i < len(hotspots)-1; i++ {
-		for j := i + 1; j < len(hotspots); j++ {
-			if hotspots[j].CallCount > hotspots[i].CallCount {
-				hotspots[i], hotspots[j] = hotspots[j], hotspots[i]
-			}
-		}
-	}
-
-	if len(hotspots) > limit {
-		hotspots = hotspots[:limit]
-	}
-
-	results := make([]map[string]any, len(hotspots))
-	for i, h := range hotspots {
-		results[i] = map[string]any{
-			"id":         h.ID,
-			"name":       h.Name,
-			"kind":       h.Kind,
-			"file":       h.File,
-			"line":       h.Line,
-			"call_count": h.CallCount,
-		}
+		results = append(results, hotspotInfo{
+			ID:            h.Node.ID,
+			Name:          h.Node.Name,
+			Kind:          string(h.Node.Kind),
+			File:          h.Node.File,
+			Line:          h.Node.Line,
+			QualifiedName: h.Node.QualifiedName,
+			FanIn:         h.FanIn,
+			FanOut:        h.FanOut,
+			CallCount:     h.CallCount,
+			Score:         h.Score,
+			Exported:      h.Node.Exported,
+		})
 	}
 
 	return map[string]any{

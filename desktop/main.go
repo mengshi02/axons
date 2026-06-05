@@ -7,6 +7,7 @@
 //   - The Wails webview loads the daemon's URL directly — no AssetHandler needed.
 //   - Frontend calls the daemon's HTTP API via fetch (same-origin, no CORS issues).
 //   - No Wails bindings are used; the daemon's Go HTTP routes are the only backend.
+//   - The Wails RawMessageHandler is used for desktop-specific IPC (e.g., open-external).
 package main
 
 import (
@@ -16,6 +17,7 @@ import (
 	"net/http"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -120,6 +122,17 @@ func main() {
 		Description: appDescription,
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
+		},
+		RawMessageHandler: func(window application.Window, message string, originInfo *application.OriginInfo) {
+			const prefix = "open-external:"
+			if !strings.HasPrefix(message, prefix) {
+				return
+			}
+			url := strings.TrimPrefix(message, prefix)
+			if url == "" {
+				return
+			}
+			globalApp.Browser.OpenURL(url)
 		},
 	})
 

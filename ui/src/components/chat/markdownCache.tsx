@@ -1,7 +1,9 @@
 import { memo } from 'react';
-import type { ReactElement } from 'react';
+import type { ReactElement, AnchorHTMLAttributes } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { getRuntimeMode } from '../../lib/config';
+import { openExternal } from '../../lib/wails-bridge';
 
 /**
  * LRU cache for rendered ReactMarkdown trees.
@@ -40,8 +42,29 @@ function touch(id: string, entry: Entry) {
  * Plain ReactMarkdown wrapper, memoized at component level so identical props
  * skip the parse step. This complements the explicit cache below.
  */
+/** Custom <a> renderer: desktop mode opens external links in system browser. */
+export function MarkdownLink({ href, children, ...props }: AnchorHTMLAttributes<HTMLAnchorElement>) {
+  const isExternal = href && /^https?:\/\//.test(href);
+  if (isExternal && getRuntimeMode() === 'desktop') {
+    return (
+      <a
+        href={href}
+        onClick={(e) => { e.preventDefault(); openExternal(href!); }}
+        {...props}
+      >
+        {children}
+      </a>
+    );
+  }
+  return <a href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>;
+}
+
 const MarkdownInner = memo(function MarkdownInner({ content }: { content: string }) {
-  return <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>;
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: MarkdownLink }}>
+      {content}
+    </ReactMarkdown>
+  );
 });
 
 /**
