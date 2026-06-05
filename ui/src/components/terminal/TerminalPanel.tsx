@@ -74,10 +74,16 @@ function getTerminalContainerPixelSize(xterm: XTerm): { width: number; height: n
   const padLeft = parseInt(style.paddingLeft) || 0;
   const padRight = parseInt(style.paddingRight) || 0;
 
-  // 滚动条宽度（与 FitAddon 逻辑一致）
-  const scrollbarWidth = xterm.options.scrollback === 0
+  // 滚动条宽度
+  // xterm v6 自研滚动条：如果 scrollback=0 则无滚动条；
+  // 否则取 scrollbar.width（默认 14px，即 ViewportConstants.DEFAULT_SCROLL_BAR_WIDTH），
+  // 但 scrollbar.showScrollbar=false 时宽度为 0。
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const scrollbarOpts = (xterm.options as any).scrollbar;
+  const showScrollbar = typeof scrollbarOpts === 'object' ? (scrollbarOpts.showScrollbar !== false) : true;
+  const scrollbarWidth = (xterm.options.scrollback === 0 || !showScrollbar)
     ? 0
-    : 14; // ViewportConstants.DEFAULT_SCROLL_BAR_WIDTH
+    : (typeof scrollbarOpts === 'object' && scrollbarOpts.width ? scrollbarOpts.width : 14);
 
   const availableWidth = parentWidth - padLeft - padRight - scrollbarWidth;
   const availableHeight = parentHeight - padTop - padBottom;
@@ -132,6 +138,9 @@ const TERMINAL_THEMES = {
     cursorAccent: '#0a0a10',
     selectionBackground: '#7c3aed40', // 半透明紫色（~25%透明度，暗色主题下可视且不遮挡文字）
     selectionForeground: '#e4e4ed',
+    scrollbarSliderBackground: '#79797966', // 滚动条滑块（半透明灰）
+    scrollbarSliderHoverBackground: '#79797999', // 悬停
+    scrollbarSliderActiveBackground: '#bfbfbf99', // 拖拽/激活
     black: '#06060a',
     red: '#f14c4c',
     green: '#10b981',
@@ -156,6 +165,9 @@ const TERMINAL_THEMES = {
     cursorAccent: '#ffffff',
     selectionBackground: '#2563eb55', // 半透明蓝色（~33%透明度，亮色主题下清晰可见）
     selectionForeground: '#1a1a2e',
+    scrollbarSliderBackground: '#64646466', // 滚动条滑块（半透明灰）
+    scrollbarSliderHoverBackground: '#64646499', // 悬停
+    scrollbarSliderActiveBackground: '#00000099', // 拖拽/激活
     black: '#000000',
     red: '#dc2626',
     green: '#16a34a',
@@ -264,6 +276,7 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
   // Initialize terminal instance for a tab
   const initTerminal = useCallback((tabId: string) => {
     // Create terminal instance with theme colors
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const xterm = new XTerm({
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
       fontSize: 12,
@@ -275,12 +288,18 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       scrollback: 10000,
       convertEol: true, // Convert \n to \r\n for proper line endings
       scrollOnUserInput: true, // Auto-scroll to bottom on user input
+      // 启用 xterm 内置自研滚动条
+      // 宽度 14px 与 IDE 终端一致，overviewRuler 用于 shell integration 装饰标记
+      // xterm 6.0.0 类型定义不含 scrollbar 选项，但运行时支持
+      scrollbar: {
+        width: 14,
+      },
       // resize 路径不能有平滑动画——否则 drag 期间每次 xterm.resize() 都触发 125ms
       // 动画，下一帧 rows 又变，动画被打断重启，导致滚动条持续抖动。
       smoothScrollDuration: 0,
       // WebGL 启用后，对可能与下一格重叠的字形做保守缩放，CJK / Powerline 字符更紧凑
       rescaleOverlappingGlyphs: true,
-    });
+    } as any);
 
     // Load addons
     const fitAddon = new FitAddon();
@@ -853,8 +872,6 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       return getXtermScaledDimensions(ai.xterm);
     };
 
-    let rafId: number | null = null;
-
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDraggingRef.current || !panelRef.current) return;
 
@@ -864,22 +881,24 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
         window.innerHeight - 100,
       );
       pendingHeightRef.current = newHeight;
+      // 同步设置 CSS height（立即生效）
       panelRef.current.style.height = `${newHeight}px`;
 
-      if (rafId !== null) return;
-      rafId = requestAnimationFrame(() => {
-        rafId = null;
-        const dims = getTargetDimensions();
-        if (!dims) return;
-        // immediate=false：走 TerminalResizeDebouncer 正常路径
-        resizeDebounced(dims.cols, dims.rows, false);
-      });
+      // ── 同步布局（ SplitView 模式）──
+      // CSS height 已改，getTargetDimensions() 内部读 clientHeight
+      // 会同步拿到新值，然后立即 xterm.resize()，使
+      // Viewport._sync() 在同一 JS task 内用一致的
+      // height/scrollHeight 更新 scrollbar，消除抖动。
+      const dims = getTargetDimensions();
+      if (!dims) return;
+      // immediate=false：走 TerminalResizeDebouncer 正常路径
+      // （rows 立即，cols debounce 100ms）
+      resizeDebounced(dims.cols, dims.rows, false);
     };
 
     const handleMouseUp = () => {
       if (!isDraggingRef.current) return;
       isDraggingRef.current = false;
-      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
       document.body.classList.remove('axons-resizing');
@@ -898,7 +917,6 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
-      if (rafId !== null) cancelAnimationFrame(rafId);
       if (debounceXTimer !== null) clearTimeout(debounceXTimer);
       if (resizeXJobId !== null) cancelIdleCallback(resizeXJobId);
       if (resizeYJobId !== null) cancelIdleCallback(resizeYJobId);
