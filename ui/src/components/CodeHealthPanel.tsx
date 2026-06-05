@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   X, Activity, AlertTriangle, Zap, GitBranch,
   TrendingUp, FileCode, RefreshCw, ChevronRight,
   ArrowUpRight,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   fetchHotspots, fetchDeadCode, fetchCoChanges,
   type HotspotItem, type DeadCodeItem, type CoChangeItem,
@@ -14,7 +15,12 @@ import type { PanelComponentProps } from '../lib/panelRegistry';
 
 type Tab = 'hotspots' | 'deadcode' | 'cochange';
 
-export function CodeHealthPanel({ onClose, onSelectNode }: PanelComponentProps) {
+/** Virtual list row types for dead code tab */
+type DeadCodeRow =
+  | { type: 'header'; key: string; icon: 'red' | 'yellow'; label: string }
+  | { type: 'item'; key: string; node: DeadCodeItem; accent: 'red' | 'yellow' };
+
+export const CodeHealthPanel = React.memo(function CodeHealthPanel({ onClose, onSelectNode }: PanelComponentProps) {
   const { t } = useTranslation('panels');
   const { currentProject } = useAppState();
   const [activeTab, setActiveTab] = useState<Tab>('hotspots');
@@ -81,8 +87,45 @@ export function CodeHealthPanel({ onClose, onSelectNode }: PanelComponentProps) 
     return 'text-blue-400';
   };
 
+  // ─── Virtual list for dead code tab ──────────────────────────────────────
+  // Use ref for onSelectNode so deadCodeRows useMemo doesn't recalculate on prop changes
+  const onSelectNodeRef = useRef(onSelectNode);
+  onSelectNodeRef.current = onSelectNode;
+
+  // Build a flat row array: header + items for dead nodes, header + items for unused exports
+  const deadCodeRows: DeadCodeRow[] = useMemo(() => {
+    const rows: DeadCodeRow[] = [];
+    rows.push({ type: 'header', key: 'dead-header', icon: 'red', label: t('codeHealth.unreachable', { count: deadNodes.length }) });
+    for (const n of deadNodes) {
+      rows.push({ type: 'item', key: `dead-${n.id}`, node: n, accent: 'red' });
+    }
+    rows.push({ type: 'header', key: 'unused-header', icon: 'yellow', label: t('codeHealth.unusedExports', { count: unusedExports.length }) });
+    for (const n of unusedExports) {
+      rows.push({ type: 'item', key: `unused-${n.id}`, node: n, accent: 'yellow' });
+    }
+    return rows;
+  }, [deadNodes, unusedExports, t]);
+
+  const deadCodeScrollRef = useRef<HTMLDivElement>(null);
+  const deadCodeVirtualizer = useVirtualizer({
+    count: deadCodeRows.length,
+    getScrollElement: () => deadCodeScrollRef.current,
+    estimateSize: (index) => deadCodeRows[index].type === 'header' ? 40 : 50,
+    overscan: 10,
+    measureElement: (el) => el.getBoundingClientRect().height,
+  });
+
+  // ─── Virtual list for co-change tab ──────────────────────────────────────
+  const coChangeScrollRef = useRef<HTMLDivElement>(null);
+  const coChangeVirtualizer = useVirtualizer({
+    count: coChanges.length,
+    getScrollElement: () => coChangeScrollRef.current,
+    estimateSize: () => 80,
+    overscan: 10,
+  });
+
   return (
-    <div className="w-full bg-surface flex flex-col overflow-hidden">
+    <div className="w-full bg-surface flex flex-col overflow-hidden" style={{ contain: 'layout style' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle">
         <div className="flex items-center gap-2">
@@ -129,7 +172,7 @@ export function CodeHealthPanel({ onClose, onSelectNode }: PanelComponentProps) 
       </div>
 
       {/* Content */}
-      <div className="overflow-y-auto max-h-80">
+      <div>
         {error && (
           <div className="m-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400">
             {error}
@@ -144,9 +187,9 @@ export function CodeHealthPanel({ onClose, onSelectNode }: PanelComponentProps) 
 
         {!loading && !error && (
           <>
-            {/* Hotspots Tab */}
+            {/* Hotspots Tab — low item count (≤30), no virtualization needed */}
             {activeTab === 'hotspots' && (
-              <div className="p-4 space-y-3">
+              <div className="overflow-y-auto max-h-80 p-4 space-y-3">
                 <div className="flex items-center gap-2 text-xs text-text-muted mb-2">
                   <TrendingUp className="w-3.5 h-3.5" />
                   <span>Functions with highest call coupling (fan-in × 2 + fan-out)</span>
@@ -190,76 +233,143 @@ export function CodeHealthPanel({ onClose, onSelectNode }: PanelComponentProps) 
               </div>
             )}
 
-            {/* Dead Code Tab */}
+            {/* Dead Code Tab — VIRTUALIZED for performance with large datasets */}
             {activeTab === 'deadcode' && (
-              <div className="p-4 space-y-4">
-                {/* Dead nodes */}
-                <div>
-                  <div className="flex items-center gap-2 text-xs font-medium text-text-secondary mb-2">
-                    <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
-                    <span>{t('codeHealth.unreachable', { count: deadNodes.length })}</span>
-                  </div>
-                  <div className="space-y-1.5">
-                    {deadNodes.length === 0 ? (
+              <div ref={deadCodeScrollRef} className="overflow-y-auto max-h-80 px-4 py-3">
+                {deadCodeRows.length === 2 ? (
+                  // Only headers, no data
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex items-center gap-2 text-xs font-medium text-text-secondary mb-2">
+                        <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                        <span>{t('codeHealth.unreachable', { count: 0 })}</span>
+                      </div>
                       <EmptyState message={t('codeHealth.noDeadCode')} compact />
-                    ) : (
-                      deadNodes.map((n) => (
-                        <NodeRow key={n.id} node={n} onClick={() => onSelectNode?.(String(n.id))} />
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* Unused exports */}
-                <div>
-                  <div className="flex items-center gap-2 text-xs font-medium text-text-secondary mb-2">
-                    <FileCode className="w-3.5 h-3.5 text-yellow-400" />
-                    <span>{t('codeHealth.unusedExports', { count: unusedExports.length })}</span>
-                  </div>
-                  <div className="space-y-1.5">
-                    {unusedExports.length === 0 ? (
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 text-xs font-medium text-text-secondary mb-2">
+                        <FileCode className="w-3.5 h-3.5 text-yellow-400" />
+                        <span>{t('codeHealth.unusedExports', { count: 0 })}</span>
+                      </div>
                       <EmptyState message={t('codeHealth.noUnusedExports')} compact />
-                    ) : (
-                      unusedExports.map((n) => (
-                        <NodeRow key={n.id} node={n} onClick={() => onSelectNode?.(String(n.id))} accent="yellow" />
-                      ))
-                    )}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div
+                    style={{
+                      height: `${deadCodeVirtualizer.getTotalSize()}px`,
+                      width: '100%',
+                      position: 'relative',
+                    }}
+                  >
+                    {deadCodeVirtualizer.getVirtualItems().map((virtualRow) => {
+                      const row = deadCodeRows[virtualRow.index];
+                      if (row.type === 'header') {
+                        return (
+                          <div
+                            key={row.key}
+                            data-index={virtualRow.index}
+                            ref={deadCodeVirtualizer.measureElement}
+                            className="flex items-center gap-2 text-xs font-medium text-text-secondary pb-1.5"
+                            style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              width: '100%',
+                              transform: `translateY(${virtualRow.start}px)`,
+                            }}
+                          >
+                            {row.icon === 'red' ? (
+                              <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                            ) : (
+                              <FileCode className="w-3.5 h-3.5 text-yellow-400" />
+                            )}
+                            <span>{row.label}</span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div
+                          key={row.key}
+                          data-index={virtualRow.index}
+                          ref={deadCodeVirtualizer.measureElement}
+                          className="pb-1.5"
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            transform: `translateY(${virtualRow.start}px)`,
+                          }}
+                        >
+                          <NodeRow node={row.node} onClick={() => onSelectNodeRef.current?.(String(row.node.id))} accent={row.accent} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Co-Change Tab */}
+            {/* Co-Change Tab — VIRTUALIZED */}
             {activeTab === 'cochange' && (
-              <div className="p-4 space-y-3">
-                <div className="flex items-center gap-2 text-xs text-text-muted mb-2">
-                  <GitBranch className="w-3.5 h-3.5" />
-                  <span>Files frequently changed together (Jaccard similarity)</span>
+              <div>
+                <div className="px-4 pt-4 pb-2">
+                  <div className="flex items-center gap-2 text-xs text-text-muted">
+                    <GitBranch className="w-3.5 h-3.5" />
+                    <span>Files frequently changed together (Jaccard similarity)</span>
+                  </div>
                 </div>
                 {coChanges.length === 0 ? (
-                  <EmptyState message="No co-change data. Run co-change analysis first." />
+                  <div className="p-4">
+                    <EmptyState message="No co-change data. Run co-change analysis first." />
+                  </div>
                 ) : (
-                  coChanges.map((cc, i) => (
-                    <div key={i} className="p-3 bg-elevated rounded-lg border border-border-subtle hover:border-accent/40 transition-colors">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs font-medium px-1.5 py-0.5 bg-accent/10 text-accent rounded">
-                          {cc.commit_count} commits
-                        </span>
-                        <span className={`text-xs font-bold ${jaccardColor(cc.jaccard)}`}>
-                          J={cc.jaccard.toFixed(2)}
-                        </span>
-                      </div>
-                      <div className="space-y-1">
-                        <div className="text-xs text-text-primary font-mono truncate" title={cc.file_a}>{shortPath(cc.file_a)}</div>
-                        <div className="flex items-center gap-1 text-xs text-text-muted">
-                          <div className="h-px flex-1 bg-border-subtle" />
-                          <span>co-changes with</span>
-                          <div className="h-px flex-1 bg-border-subtle" />
-                        </div>
-                        <div className="text-xs text-text-primary font-mono truncate" title={cc.file_b}>{shortPath(cc.file_b)}</div>
+                    <div ref={coChangeScrollRef} className="overflow-y-auto max-h-80 px-4 pb-4 space-y-3">
+                      <div
+                        style={{
+                          height: `${coChangeVirtualizer.getTotalSize()}px`,
+                          width: '100%',
+                          position: 'relative',
+                        }}
+                      >
+                        {coChangeVirtualizer.getVirtualItems().map((virtualRow) => {
+                          const cc = coChanges[virtualRow.index];
+                          return (
+                            <div
+                              key={virtualRow.key}
+                              className="p-3 bg-elevated rounded-lg border border-border-subtle hover:border-accent/40 transition-colors"
+                              style={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                width: '100%',
+                                height: virtualRow.size,
+                                transform: `translateY(${virtualRow.start}px)`,
+                              }}
+                            >
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-xs font-medium px-1.5 py-0.5 bg-accent/10 text-accent rounded">
+                                  {cc.commit_count} commits
+                                </span>
+                                <span className={`text-xs font-bold ${jaccardColor(cc.jaccard)}`}>
+                                  J={cc.jaccard.toFixed(2)}
+                                </span>
+                              </div>
+                              <div className="space-y-1">
+                                <div className="text-xs text-text-primary font-mono truncate" title={cc.file_a}>{shortPath(cc.file_a)}</div>
+                                <div className="flex items-center gap-1 text-xs text-text-muted">
+                                  <div className="h-px flex-1 bg-border-subtle" />
+                                  <span>co-changes with</span>
+                                  <div className="h-px flex-1 bg-border-subtle" />
+                                </div>
+                                <div className="text-xs text-text-primary font-mono truncate" title={cc.file_b}>{shortPath(cc.file_b)}</div>
+                              </div>
+                            </div>
+                        );
+                      })}
                       </div>
                     </div>
-                  ))
                 )}
               </div>
             )}
@@ -268,7 +378,7 @@ export function CodeHealthPanel({ onClose, onSelectNode }: PanelComponentProps) 
       </div>
     </div>
   );
-}
+});
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
 
@@ -280,7 +390,7 @@ function EmptyState({ message, compact }: { message: string; compact?: boolean }
   );
 }
 
-function NodeRow({
+const NodeRow = React.memo(function NodeRow({
   node,
   onClick,
   accent = 'red',
@@ -311,4 +421,4 @@ function NodeRow({
       </div>
     </div>
   );
-}
+});

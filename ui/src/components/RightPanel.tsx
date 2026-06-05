@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   X, Send, Loader2, Sparkles, MessageSquare, Search,
   Code, FileText, ChevronDown, Plus, AlertTriangle,
@@ -127,7 +127,7 @@ function saveConversationsToStorage(projectId: string | undefined, conversations
   }
 }
 
-export function RightPanel({ onClose }: PanelComponentProps) {
+export const RightPanel = React.memo(function RightPanel({ onClose }: PanelComponentProps) {
   const { t } = useTranslation('chat');
   const {
     graph, selectedNode,
@@ -832,58 +832,58 @@ export function RightPanel({ onClose }: PanelComponentProps) {
 
           {showHistory && (
             <div className="absolute top-full right-0 mt-1 w-72 bg-elevated border border-border-subtle rounded-lg shadow-lg z-50 overflow-hidden">
-                <div className="flex items-center justify-between px-3 py-2 border-b border-border-subtle">
-                  <span className="text-xs font-medium text-text-secondary">Chat History</span>
-                  <button
-                    onClick={() => createNewConversation()}
-                    className="flex items-center gap-1 text-xs text-accent hover:text-accent/80 transition-colors"
-                  >
-                    <Plus className="w-3 h-3" />
-                    New
-                  </button>
-                </div>
-                <div className="max-h-80 overflow-y-auto">
-                  {conversations.length === 0 ? (
-                    <div className="px-3 py-4 text-xs text-text-muted text-center">No conversations yet</div>
-                  ) : (
-                    conversations.map(conv => (
-                      <button
-                        key={conv.id}
-                        onClick={() => handleSwitchConversation(conv.id)}
-                        className={`w-full flex items-center gap-2 px-3 py-2.5 text-left transition-colors group ${conv.id === currentConvId
-                          ? 'bg-accent/10 text-accent'
-                          : 'hover:bg-hover text-text-primary'
-                          }`}
-                      >
-                        <MessageSquare className="w-3.5 h-3.5 shrink-0 opacity-60" />
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm truncate">{conv.title}</div>
-                          <div className="flex items-center gap-1 mt-0.5 min-w-0">
-                            {(() => {
-                              const agent = agents.find(a => a.id === conv.agentId);
-                              return agent ? (
-                                <span className="flex items-center gap-0.5 shrink-0 text-xs text-accent/70">
-                                  <AgentIcon icon={agent.icon} className="w-2.5 h-2.5" />
-                                  <span className="max-w-[70px] truncate">{agent.name}</span>
-                                </span>
-                              ) : null;
-                            })()}
-                            <span className="text-xs text-text-muted truncate">
-                              · {conv.messages.length} msgs · {formatRelativeTime(conv.updatedAt)}
-                            </span>
-                          </div>
-                        </div>
-                        <button
-                          onClick={(e) => handleDeleteConversation(conv.id, e)}
-                          className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500/20 hover:text-red-400 transition-all"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </button>
-                    ))
-                  )}
-                </div>
+              <div className="flex items-center justify-between px-3 py-2 border-b border-border-subtle">
+                <span className="text-xs font-medium text-text-secondary">Chat History</span>
+                <button
+                  onClick={() => createNewConversation()}
+                  className="flex items-center gap-1 text-xs text-accent hover:text-accent/80 transition-colors"
+                >
+                  <Plus className="w-3 h-3" />
+                  New
+                </button>
               </div>
+              <div className="max-h-80 overflow-y-auto">
+                {conversations.length === 0 ? (
+                  <div className="px-3 py-4 text-xs text-text-muted text-center">No conversations yet</div>
+                ) : (
+                  conversations.map(conv => (
+                    <button
+                      key={conv.id}
+                      onClick={() => handleSwitchConversation(conv.id)}
+                      className={`w-full flex items-center gap-2 px-3 py-2.5 text-left transition-colors group ${conv.id === currentConvId
+                        ? 'bg-accent/10 text-accent'
+                        : 'hover:bg-hover text-text-primary'
+                        }`}
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 shrink-0 opacity-60" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm truncate">{conv.title}</div>
+                        <div className="flex items-center gap-1 mt-0.5 min-w-0">
+                          {(() => {
+                            const agent = agents.find(a => a.id === conv.agentId);
+                            return agent ? (
+                              <span className="flex items-center gap-0.5 shrink-0 text-xs text-accent/70">
+                                <AgentIcon icon={agent.icon} className="w-2.5 h-2.5" />
+                                <span className="max-w-[70px] truncate">{agent.name}</span>
+                              </span>
+                            ) : null;
+                          })()}
+                          <span className="text-xs text-text-muted truncate">
+                            · {conv.messages.length} msgs · {formatRelativeTime(conv.updatedAt)}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => handleDeleteConversation(conv.id, e)}
+                        className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500/20 hover:text-red-400 transition-all"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
           )}
 
           <button
@@ -942,7 +942,7 @@ export function RightPanel({ onClose }: PanelComponentProps) {
                     {currentAgent ? (
                       <AgentIcon icon={currentAgent.icon} className="w-6 h-6 text-accent" />
                     ) : (
-                        <Sparkles className="w-6 h-6 text-accent" />
+                      <Sparkles className="w-6 h-6 text-accent" />
                     )}
                   </div>
                   <h3 className="text-sm font-medium text-text-primary mb-1">
@@ -1093,11 +1093,11 @@ export function RightPanel({ onClose }: PanelComponentProps) {
                   ) : (
                     <button
                       onClick={handleSend}
-                        disabled={composerEmpty}
-                        className="p-1.5 bg-accent text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent/90 transition-colors"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                      </button>
+                      disabled={composerEmpty}
+                      className="p-1.5 bg-accent text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent/90 transition-colors"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                    </button>
                   )}
                 </div>
               </div>
@@ -1184,64 +1184,64 @@ export function RightPanel({ onClose }: PanelComponentProps) {
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
-                            value={semanticQuery}
-                            onChange={e => setSemanticQuery(e.target.value)}
-                            onKeyDown={e => e.key === 'Enter' && handleSemanticSearch()}
-                            placeholder={t('searchPlaceholder')}
-                            className="flex-1 px-3 py-2 bg-elevated border border-border-subtle rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 transition-all"
-                          />
-                          <button
-                            onClick={handleSemanticSearch}
-                            disabled={!semanticQuery.trim() || isSemanticSearching}
-                            className="p-2 bg-accent text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-accent/90 transition-colors"
-                          >
-                            {isSemanticSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                          </button>
-                        </div>
-                        <p className="text-[11px] text-text-muted mt-1.5">
-                          Describe functionality or logic in natural language, and semantic search will find relevant code.
-                        </p>
-                      </div>
+                      value={semanticQuery}
+                      onChange={e => setSemanticQuery(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleSemanticSearch()}
+                      placeholder={t('searchPlaceholder')}
+                      className="flex-1 px-3 py-2 bg-elevated border border-border-subtle rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 transition-all"
+                    />
+                    <button
+                      onClick={handleSemanticSearch}
+                      disabled={!semanticQuery.trim() || isSemanticSearching}
+                      className="p-2 bg-accent text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-accent/90 transition-colors"
+                    >
+                      {isSemanticSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-text-muted mt-1.5">
+                    Describe functionality or logic in natural language, and semantic search will find relevant code.
+                  </p>
+                </div>
 
-                      {/* Results */}
-                      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                        {semanticResults.length === 0 && semanticQuery && !isSemanticSearching && (
-                          <div className="text-center text-text-muted text-sm py-8">
-                            <Search className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                            <p>No relevant results found</p>
-                          </div>
-                        )}
-                        {semanticResults.map(result => (
-                          <div
-                            key={result.id}
-                            className="p-3 bg-elevated rounded-lg border border-border-subtle hover:border-accent/50 transition-colors cursor-pointer"
-                            onClick={() => {
-                              window.dispatchEvent(new CustomEvent('navigate-to-file', {
-                                detail: { path: result.file, line: result.line }
-                              }));
-                            }}
-                          >
-                            <div className="flex items-center gap-2 mb-1">
-                              <FileText className="w-3.5 h-3.5 text-accent flex-shrink-0" />
-                              <span className="font-medium text-text-primary text-sm flex-1 truncate">{result.name}</span>
-                              <span className="text-xs px-1.5 py-0.5 bg-accent/10 text-accent rounded flex-shrink-0">{result.kind}</span>
-                              {/* Relevance score */}
-                              <span className="text-[10px] text-text-muted flex-shrink-0" title={t('relevanceScore')}>
-                                {result.score.toFixed(2)}
-                              </span>
-                            </div>
-                            <div className="text-xs text-text-muted truncate">
-                              {result.file}:{result.line}
-                              {result.end_line && result.end_line > result.line && `-${result.end_line}`}
-                            </div>
-                            {result.content && (
-                              <div className="mt-1.5 text-xs text-text-secondary font-mono bg-surface px-2 py-1 rounded truncate">
-                                {result.content.slice(0, 150)}
-                              </div>
-                            )}
-                          </div>
-                        ))}
+                {/* Results */}
+                <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                  {semanticResults.length === 0 && semanticQuery && !isSemanticSearching && (
+                    <div className="text-center text-text-muted text-sm py-8">
+                      <Search className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                      <p>No relevant results found</p>
+                    </div>
+                  )}
+                  {semanticResults.map(result => (
+                    <div
+                      key={result.id}
+                      className="p-3 bg-elevated rounded-lg border border-border-subtle hover:border-accent/50 transition-colors cursor-pointer"
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent('navigate-to-file', {
+                          detail: { path: result.file, line: result.line }
+                        }));
+                      }}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <FileText className="w-3.5 h-3.5 text-accent flex-shrink-0" />
+                        <span className="font-medium text-text-primary text-sm flex-1 truncate">{result.name}</span>
+                        <span className="text-xs px-1.5 py-0.5 bg-accent/10 text-accent rounded flex-shrink-0">{result.kind}</span>
+                        {/* Relevance score */}
+                        <span className="text-[10px] text-text-muted flex-shrink-0" title={t('relevanceScore')}>
+                          {result.score.toFixed(2)}
+                        </span>
                       </div>
+                      <div className="text-xs text-text-muted truncate">
+                        {result.file}:{result.line}
+                        {result.end_line && result.end_line > result.line && `-${result.end_line}`}
+                      </div>
+                      {result.content && (
+                        <div className="mt-1.5 text-xs text-text-secondary font-mono bg-surface px-2 py-1 rounded truncate">
+                          {result.content.slice(0, 150)}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </>
             )}
           </>
@@ -1275,7 +1275,7 @@ export function RightPanel({ onClose }: PanelComponentProps) {
       />
     </div>
   );
-}
+});
 
 // ---- Helpers ----
 function formatRelativeTime(date: Date): string {

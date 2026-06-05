@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAppState } from '../hooks/useAppState';
-import { useState, useRef, useEffect, type ComponentType } from 'react';
+import React, { useState, useRef, useEffect, type ComponentType } from 'react';
 import { useIframePointerEvents } from '../hooks/useIframePointerEvents';
 import { ProjectSelector } from './ProjectSelector';
 import type { PanelDef } from '../lib/panelRegistry';
@@ -20,7 +20,7 @@ const ICON_MAP: Record<string, ComponentType<{ className?: string }>> = {
 
 interface ActivityBarProps { }
 
-export function ActivityBar(_props: ActivityBarProps) {
+export const ActivityBar = React.memo(function ActivityBar(_props: ActivityBarProps) {
     const {
         openPanel,
         togglePanel,
@@ -168,4 +168,4 @@ export function ActivityBar(_props: ActivityBarProps) {
             </div>
         </div>
     );
-}
+});

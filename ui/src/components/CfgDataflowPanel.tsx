@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { X, Route, RefreshCw, ArrowRight, ArrowDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { fetchCfg, type CfgData, type CfgBlock } from '../services/analysis';
@@ -32,7 +32,7 @@ const EDGE_COLORS: Record<string, string> = {
   sequential: 'text-text-muted',
 };
 
-export function CfgDataflowPanel({ onClose }: PanelComponentProps) {
+export const CfgDataflowPanel = React.memo(function CfgDataflowPanel({ onClose }: PanelComponentProps) {
   const { t } = useTranslation('panels');
   const { selectedNode, graph, currentProject } = useAppState();
   const [loading, setLoading] = useState(false);
@@ -84,7 +84,7 @@ export function CfgDataflowPanel({ onClose }: PanelComponentProps) {
     (cfgData?.edges || []).filter(e => e.target === idx);
 
   return (
-    <div className="w-full bg-surface flex flex-col overflow-hidden">
+    <div className="w-full bg-surface flex flex-col overflow-hidden" style={{ contain: 'layout style' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle">
         <div className="flex items-center gap-2">
@@ -113,7 +113,7 @@ export function CfgDataflowPanel({ onClose }: PanelComponentProps) {
       {/* Content */}
       <div className="overflow-y-auto max-h-80 p-4">
         {!selectedNode && (
-          <div className="text-xs text-text-muted text-center py-12">
+          <div className="flex items-center justify-center text-xs text-text-muted py-8">
             Select a function or method node to view its control flow graph
           </div>
         )}
@@ -128,7 +128,7 @@ export function CfgDataflowPanel({ onClose }: PanelComponentProps) {
         )}
 
         {loading && (
-          <div className="flex items-center justify-center h-24">
+          <div className="flex items-center justify-center py-8">
             <RefreshCw className="w-5 h-5 text-accent animate-spin" />
           </div>
         )}
@@ -238,4 +238,4 @@ export function CfgDataflowPanel({ onClose }: PanelComponentProps) {
       </div>
     </div>
   );
-}
+});

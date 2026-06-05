@@ -1,6 +1,6 @@
 import { Search, FileText, Loader2 } from 'lucide-react';
 import { useAppState } from '../hooks/useAppState';
-import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useIframePointerEvents } from '../hooks/useIframePointerEvents';
 import type { GraphNode } from '../types/graph';
@@ -37,7 +37,7 @@ interface TopSearchBarProps {
 
 type SearchMode = 'node' | 'fulltext';
 
-export function TopSearchBar({ onFocusNode, notifications, unreadCount, isPanelOpen, onTogglePanel, onMarkRead, onMarkAllRead, onDeleteNotification, onClosePanel, onOpenPanel }: TopSearchBarProps) {
+export const TopSearchBar = React.memo(function TopSearchBar({ onFocusNode, notifications, unreadCount, isPanelOpen, onTogglePanel, onMarkRead, onMarkAllRead, onDeleteNotification, onClosePanel, onOpenPanel }: TopSearchBarProps) {
     const { t } = useTranslation('common');
     const {
         graph,
@@ -357,4 +357,4 @@ export function TopSearchBar({ onFocusNode, notifications, unreadCount, isPanelO
             </div>
         </div>
     );
-}
+});

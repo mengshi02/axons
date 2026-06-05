@@ -4,7 +4,7 @@
  * 展示已安装插件列表，支持启动/停止/卸载操作
  */
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Puzzle, Play, Square, Trash2, RefreshCw, Upload, Download, Terminal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePluginList, type PluginCard } from '../hooks/usePluginRegistry';
@@ -29,7 +29,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   productivity: 'Productivity',
 };
 
-export function ExtensionsPanel({ onClose }: PanelComponentProps) {
+export const ExtensionsPanel = React.memo(function ExtensionsPanel({ onClose }: PanelComponentProps) {
   const { t } = useTranslation('extensions');
   const { plugins, loading, refresh } = usePluginList();
   const [filter, setFilter] = useState<string>('all');
@@ -309,7 +309,7 @@ export function ExtensionsPanel({ onClose }: PanelComponentProps) {
       />
     </div>
   );
-}
+});
 
 /** Single plugin card with optional install log panel */
 function PluginCardItem({

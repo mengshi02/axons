@@ -39,7 +39,7 @@ const RULE_KIND_OPTIONS: SelectOption[] = [
   { value: 'allow', label: 'Allow' },
 ];
 
-export function ArchRulesPanel({ onClose }: PanelComponentProps) {
+export const ArchRulesPanel = React.memo(function ArchRulesPanel({ onClose }: PanelComponentProps) {
   const { t } = useTranslation('panels');
   const { currentProject } = useAppState();
 
@@ -314,7 +314,7 @@ export function ArchRulesPanel({ onClose }: PanelComponentProps) {
       />
     </Modal >
   );
-}
+});
 
 const inputStyle: React.CSSProperties = {
   padding: '7px 10px', borderRadius: 6,

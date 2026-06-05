@@ -1,3 +1,4 @@
+import React from 'react';
 import {
     Activity, BarChart3, Radar, Route, ArrowLeftRight,
     Shield, Workflow, Terminal, CircleDot, Waypoints, Bell,
@@ -39,7 +40,7 @@ function FooterButton({ panel, isActive, onToggle, iconClass, btnBase, activeCla
     );
 }
 
-export function Footer() {
+export const Footer = React.memo(function Footer() {
     const { t } = useTranslation();
     const {
         graph,
@@ -135,4 +136,4 @@ export function Footer() {
             </div>
         </footer>
     );
-}
+});

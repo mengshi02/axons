@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from 'react';
 import type { KnowledgeGraph, RepoInfo, CodeReference, EdgeType, NodeLabel } from '../types/graph';
 import { DEFAULT_VISIBLE_LABELS, DEFAULT_VISIBLE_EDGES } from '../types/graph';
 import { fetchRepos, fetchGraph, fetchFile, fetchAgents, fetchProjectStats, fetchProjectBuildStatus, fetchAppState, setActiveProject, getFileTreeExpandedPaths as fetchFileTreeExpandedPaths, setFileTreeExpandedPaths as saveFileTreeExpandedPaths, type Project, type AgentProfile, type GraphDeltaResponse, type ProjectBuildStatus } from '../services/api';
@@ -1097,7 +1097,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     prevProjectIdRef.current = projectId;
   }, [currentProject?.id, reloadGraph]);
 
-  const value: AppState = {
+  // Legacy panel computed booleans & setters — extracted as stable callbacks so
+  // useMemo value does not change on every render due to inline closures.
+  const setRightPanelOpen = useCallback((open: boolean) => open ? openPanel('rightPanel') : closePanel('rightPanel'), [openPanel, closePanel]);
+  const setFilePanelOpen = useCallback((open: boolean) => open ? openPanel('fileTree') : closePanel('fileTree'), [openPanel, closePanel]);
+  const setCodePanelOpen = useCallback((open: boolean) => open ? openPanel('codePanel') : closePanel('codePanel'), [openPanel, closePanel]);
+
+  const value: AppState = useMemo(() => ({
     viewMode,
     setViewMode,
     projects,
@@ -1183,13 +1189,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     // Legacy panel aliases — computed from openPanels
     isRightPanelOpen: openPanels.has('rightPanel'),
-    setRightPanelOpen: (open: boolean) => open ? openPanel('rightPanel') : closePanel('rightPanel'),
+    setRightPanelOpen,
     openRightPanel,
     closeRightPanel,
     isFilePanelOpen: openPanels.has('fileTree'),
-    setFilePanelOpen: (open: boolean) => open ? openPanel('fileTree') : closePanel('fileTree'),
+    setFilePanelOpen,
     isCodePanelOpen: openPanels.has('codePanel'),
-    setCodePanelOpen: (open: boolean) => open ? openPanel('codePanel') : closePanel('codePanel'),
+    setCodePanelOpen,
     openCodePanel,
     isSettingsPanelOpen: openPanels.has('settings'),
     openSettingsPanel,
@@ -1230,7 +1236,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCurrentAgentId,
     loadAgents,
     configVersion,
-  };
+  }), [
+    viewMode, setViewMode, projects, loadProjects, projectsLoaded, currentProject,
+    setCurrentProject, reloadGraph, buildingProjects, markProjectBuilding, isProjectBuilding,
+    buildProgress, updateBuildProgress, clearBuildProgress, syncBuildStatus,
+    repos, setRepos, currentRepo, setCurrentRepo, loading, error, setLoading,
+    graph, setGraph, fileContents, pendingDelta, applyDelta, applyDeltaToKnowledgeGraph,
+    selectedNode, setSelectedNode,
+    fileTreeExpandedPaths, setFileTreeExpandedPaths, fileTreeExpandedPathsReady,
+    panelRegistry, openPanels, isPanelOpen, openPanel, closePanel, togglePanel,
+    registerPanel, unregisterPanel, getPanelsByLocation, getPanelsByActivator, registryVersion,
+    codeContent, setCodeContent, codeLoading, setCodeLoading, activeFilePath, setActiveFilePath,
+    visibleLabels, setVisibleLabels, toggleLabelVisibility, visibleEdgeTypes, toggleEdgeVisibility,
+    depthFilter, setDepthFilter, layoutMode, setLayoutMode,
+    codeReferences, addCodeReference, removeCodeReference, clearCodeReferences,
+    getCachedFile, setCachedFile, clearFileCache, clearAllFileCache,
+    setRightPanelOpen, openRightPanel, closeRightPanel,
+    setFilePanelOpen, setCodePanelOpen, openCodePanel,
+    openSettingsPanel, closeSettingsPanel,
+    openCodeHealth, closeCodeHealth,
+    openGraphAnalytics, closeGraphAnalytics,
+    openImpactAnalysis, closeImpactAnalysis,
+    openCfgPanel, closeCfgPanel,
+    openSequencePanel, closeSequencePanel,
+    openArchRulesPanel, closeArchRulesPanel,
+    openProcessPanel, closeProcessPanel,
+    openTerminal, closeTerminal,
+    loadRepos, selectRepo, loadFileContent,
+    agents, currentAgentId, setCurrentAgentId, loadAgents, configVersion,
+  ]);
 
   return React.createElement(AppContext.Provider, { value }, children);
 }

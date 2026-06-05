@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   X, BarChart3, RefreshCw, Network, ListOrdered,
-  CheckCircle, XCircle, VectorSquare, ChartScatter, Waypoints, 
+  CheckCircle, XCircle, VectorSquare, ChartScatter, Waypoints,
   CircleSmall, Infinity,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   fetchGraphMetrics, fetchPageRank, fetchCommunities, fetchCycles,
   type GraphMetrics, type PageRankItem, type Community, type CycleItem,
@@ -14,7 +15,7 @@ import type { PanelComponentProps } from '../lib/panelRegistry';
 
 type Tab = 'metrics' | 'pagerank' | 'communities' | 'cycles';
 
-export function GraphAnalyticsPanel({ onClose, onSelectNode }: PanelComponentProps) {
+export const GraphAnalyticsPanel = React.memo(function GraphAnalyticsPanel({ onClose, onSelectNode }: PanelComponentProps) {
   const { t } = useTranslation('panels');
   const { currentProject } = useAppState();
   const [activeTab, setActiveTab] = useState<Tab>('metrics');
@@ -62,8 +63,46 @@ export function GraphAnalyticsPanel({ onClose, onSelectNode }: PanelComponentPro
 
   const maxRank = rankings.length > 0 ? rankings[0].page_rank : 1;
 
+  // Use ref for onSelectNode so virtualized rows don't need it as dependency
+  const onSelectNodeRef = useRef(onSelectNode);
+  onSelectNodeRef.current = onSelectNode;
+
+  // ─── Virtual list for PageRank tab ──────────────────────────────────────
+  const pageRankScrollRef = useRef<HTMLDivElement>(null);
+  const pageRankVirtualizer = useVirtualizer({
+    count: rankings.length,
+    getScrollElement: () => pageRankScrollRef.current,
+    estimateSize: () => 52,
+    overscan: 10,
+    measureElement: (el) => el.getBoundingClientRect().height,
+  });
+
+  // ─── Virtual list for Communities tab ───────────────────────────────────
+  const sortedCommunities = useMemo(
+    () => [...communities].sort((a, b) => b.size - a.size),
+    [communities]
+  );
+  const communitiesScrollRef = useRef<HTMLDivElement>(null);
+  const communitiesVirtualizer = useVirtualizer({
+    count: sortedCommunities.length,
+    getScrollElement: () => communitiesScrollRef.current,
+    estimateSize: () => 48,
+    overscan: 5,
+    measureElement: (el) => el.getBoundingClientRect().height,
+  });
+
+  // ─── Virtual list for Cycles tab ────────────────────────────────────────
+  const cyclesScrollRef = useRef<HTMLDivElement>(null);
+  const cyclesVirtualizer = useVirtualizer({
+    count: cycles.length,
+    getScrollElement: () => cyclesScrollRef.current,
+    estimateSize: () => 80,
+    overscan: 5,
+    measureElement: (el) => el.getBoundingClientRect().height,
+  });
+
   return (
-    <div className="w-full bg-surface flex flex-col overflow-hidden">
+    <div className="w-full bg-surface flex flex-col overflow-hidden" style={{ contain: 'layout style' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle">
         <div className="flex items-center gap-2">
@@ -107,7 +146,7 @@ export function GraphAnalyticsPanel({ onClose, onSelectNode }: PanelComponentPro
       </div>
 
       {/* Content */}
-      <div className="overflow-y-auto max-h-80">
+      <div>
         {error && (
           <div className="m-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400">{error}</div>
         )}
@@ -119,9 +158,9 @@ export function GraphAnalyticsPanel({ onClose, onSelectNode }: PanelComponentPro
 
         {!loading && !error && (
           <>
-            {/* Metrics Tab */}
+            {/* Metrics Tab — static content, no virtualization needed */}
             {activeTab === 'metrics' && metrics && (
-              <div className="p-4 space-y-4">
+              <div className="overflow-y-auto max-h-80 p-4 space-y-4">
                 {/* Summary cards */}
                 <div className="grid grid-cols-2 gap-3">
                   <MetricCard label={t('graphAnalytics.nodes')} value={metrics.total_nodes.toLocaleString()} icon={<CircleSmall className="w-4 h-4 text-blue-400" />} />
@@ -152,65 +191,113 @@ export function GraphAnalyticsPanel({ onClose, onSelectNode }: PanelComponentPro
               </div>
             )}
 
-            {/* PageRank Tab */}
+            {/* PageRank Tab — VIRTUALIZED */}
             {activeTab === 'pagerank' && (
-              <div className="p-4 space-y-2">
+              <div ref={pageRankScrollRef} className="overflow-y-auto max-h-80 px-4 py-3">
                 <div className="text-xs text-text-muted mb-3">
                   Most important nodes by random-walk probability (higher = more central)
                 </div>
                 {rankings.length === 0 ? (
                   <EmptyState message="No data. Build the graph first." />
                 ) : (
-                  rankings.map((item, idx) => (
                     <div
-                      key={item.id}
-                      className="flex items-center gap-3 px-3 py-2.5 bg-elevated rounded border border-border-subtle hover:border-accent/40 cursor-pointer transition-colors"
-                      onClick={() => onSelectNode?.(String(item.id))}
+                      style={{
+                        height: `${pageRankVirtualizer.getTotalSize()}px`,
+                        width: '100%',
+                        position: 'relative',
+                      }}
                     >
-                      <span className="text-xs text-text-muted w-5 text-right shrink-0">{idx + 1}</span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-medium text-text-primary truncate">{item.name}</span>
-                          <span className="text-xs px-1 bg-accent/10 text-accent rounded shrink-0">{item.kind}</span>
-                        </div>
-                        <div className="text-xs text-text-muted truncate">{shortPath(item.file)}</div>
-                      </div>
-                      <div className="shrink-0 flex flex-col items-end gap-1">
-                        <span className="text-xs font-mono text-purple-300">{(item.page_rank * 100).toFixed(3)}%</span>
-                        <div className="w-16 h-1 bg-border-subtle rounded-full overflow-hidden">
+                      {pageRankVirtualizer.getVirtualItems().map((virtualRow) => {
+                        const item = rankings[virtualRow.index];
+                        return (
                           <div
-                            className="h-full bg-purple-400 rounded-full"
-                            style={{ width: `${(item.page_rank / maxRank) * 100}%` }}
-                          />
-                        </div>
-                      </div>
+                            key={item.id}
+                            data-index={virtualRow.index}
+                            ref={pageRankVirtualizer.measureElement}
+                            className="pb-1.5"
+                            style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              width: '100%',
+                              transform: `translateY(${virtualRow.start}px)`,
+                            }}
+                          >
+                            <div
+                              className="flex items-center gap-3 px-3 py-2.5 bg-elevated rounded border border-border-subtle hover:border-accent/40 cursor-pointer transition-colors"
+                              onClick={() => onSelectNodeRef.current?.(String(item.id))}
+                            >
+                              <span className="text-xs text-text-muted w-5 text-right shrink-0">{virtualRow.index + 1}</span>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-medium text-text-primary truncate">{item.name}</span>
+                                  <span className="text-xs px-1 bg-accent/10 text-accent rounded shrink-0">{item.kind}</span>
+                                </div>
+                                <div className="text-xs text-text-muted truncate">{shortPath(item.file)}</div>
+                              </div>
+                              <div className="shrink-0 flex flex-col items-end gap-1">
+                                <span className="text-xs font-mono text-purple-300">{(item.page_rank * 100).toFixed(3)}%</span>
+                                <div className="w-16 h-1 bg-border-subtle rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-purple-400 rounded-full"
+                                    style={{ width: `${(item.page_rank / maxRank) * 100}%` }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  ))
                 )}
               </div>
             )}
 
-            {/* Communities Tab */}
+            {/* Communities Tab — VIRTUALIZED */}
             {activeTab === 'communities' && (
-              <div className="p-4 space-y-3">
+              <div ref={communitiesScrollRef} className="overflow-y-auto max-h-80 px-4 py-3">
                 <div className="text-xs text-text-muted mb-2">
                   Louvain community detection — groups of tightly coupled nodes
                 </div>
-                {communities.length === 0 ? (
+                {sortedCommunities.length === 0 ? (
                   <EmptyState message="No communities detected." />
                 ) : (
-                  communities
-                    .sort((a, b) => b.size - a.size)
-                    .map((comm, idx) => (
-                      <CommunityCard key={comm.id} community={comm} index={idx} onSelectNode={onSelectNode} />
-                    ))
+                    <div
+                      style={{
+                        height: `${communitiesVirtualizer.getTotalSize()}px`,
+                        width: '100%',
+                        position: 'relative',
+                      }}
+                    >
+                      {communitiesVirtualizer.getVirtualItems().map((virtualRow) => {
+                        const comm = sortedCommunities[virtualRow.index];
+                        const idx = virtualRow.index;
+                        return (
+                          <div
+                            key={comm.id}
+                            data-index={virtualRow.index}
+                            ref={communitiesVirtualizer.measureElement}
+                            className="pb-1.5"
+                            style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              width: '100%',
+                              transform: `translateY(${virtualRow.start}px)`,
+                            }}
+                          >
+                            <CommunityCard community={comm} index={idx} onSelectNode={onSelectNodeRef.current} />
+                          </div>
+                        );
+                      })}
+                    </div>
                 )}
               </div>
             )}
 
-            {/* Cycles Tab */}
+            {/* Cycles Tab — VIRTUALIZED */}
             {activeTab === 'cycles' && (
-              <div className="p-4 space-y-3">
+              <div ref={cyclesScrollRef} className="overflow-y-auto max-h-80 px-4 py-3">
                 <div className="text-xs text-text-muted mb-2">
                   Strongly Connected Components with 2+ nodes — potential circular dependencies
                 </div>
@@ -220,30 +307,56 @@ export function GraphAnalyticsPanel({ onClose, onSelectNode }: PanelComponentPro
                     <span className="text-xs text-text-muted">No circular dependencies detected</span>
                   </div>
                 ) : (
-                  cycles.map((cycle, idx) => (
-                    <div key={idx} className="p-3 bg-elevated rounded-lg border border-red-500/20">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-medium text-red-400">Cycle #{idx + 1}</span>
-                        <span className="text-xs text-text-muted">{cycle.length} nodes</span>
-                      </div>
-                      <div className="space-y-1">
-                        {cycle.nodes.slice(0, 5).map((n) => (
+                    <div
+                      style={{
+                        height: `${cyclesVirtualizer.getTotalSize()}px`,
+                        width: '100%',
+                        position: 'relative',
+                      }}
+                    >
+                      {cyclesVirtualizer.getVirtualItems().map((virtualRow) => {
+                        const cycle = cycles[virtualRow.index];
+                        const idx = virtualRow.index;
+                        return (
                           <div
-                            key={n.id}
-                            className="flex items-center gap-2 text-xs cursor-pointer hover:text-accent transition-colors"
-                            onClick={() => onSelectNode?.(String(n.id))}
+                            key={idx}
+                            data-index={virtualRow.index}
+                            ref={cyclesVirtualizer.measureElement}
+                            className="pb-1.5"
+                            style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              width: '100%',
+                              transform: `translateY(${virtualRow.start}px)`,
+                            }}
                           >
-                            <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
-                            <span className="font-medium truncate">{n.name}</span>
-                            <span className="text-text-muted shrink-0">{n.kind}</span>
+                            <div className="p-3 bg-elevated rounded-lg border border-red-500/20">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-medium text-red-400">Cycle #{idx + 1}</span>
+                                <span className="text-xs text-text-muted">{cycle.length} nodes</span>
+                              </div>
+                              <div className="space-y-1">
+                                {cycle.nodes.slice(0, 5).map((n) => (
+                                  <div
+                                    key={n.id}
+                                    className="flex items-center gap-2 text-xs cursor-pointer hover:text-accent transition-colors"
+                                    onClick={() => onSelectNodeRef.current?.(String(n.id))}
+                                  >
+                                    <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
+                                    <span className="font-medium truncate">{n.name}</span>
+                                    <span className="text-text-muted shrink-0">{n.kind}</span>
+                                  </div>
+                                ))}
+                                {cycle.nodes.length > 5 && (
+                                  <div className="text-xs text-text-muted pl-3.5">+{cycle.nodes.length - 5} more nodes</div>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                        ))}
-                        {cycle.nodes.length > 5 && (
-                          <div className="text-xs text-text-muted pl-3.5">+{cycle.nodes.length - 5} more nodes</div>
-                        )}
-                      </div>
+                        );
+                      })}
                     </div>
-                  ))
                 )}
               </div>
             )}
@@ -252,7 +365,7 @@ export function GraphAnalyticsPanel({ onClose, onSelectNode }: PanelComponentPro
       </div>
     </div>
   );
-}
+});
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -265,13 +378,13 @@ const COMMUNITY_COLORS = [
   'bg-cyan-500/20 border-cyan-500/30 text-cyan-300',
 ];
 
-function CommunityCard({
+const CommunityCard = React.memo(function CommunityCard({
   community, index, onSelectNode,
 }: {
   community: Community;
   index: number;
   onSelectNode?: (id: string) => void;
-}) {
+  }) {
   const [expanded, setExpanded] = useState(false);
   const colorClass = COMMUNITY_COLORS[index % COMMUNITY_COLORS.length];
   const shortPath = (file: string) => {
@@ -294,7 +407,7 @@ function CommunityCard({
       </div>
       {expanded && (
         <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
-          {community.nodes.map((n) => (
+          {community.nodes.slice(0, 30).map((n) => (
             <div
               key={n.id}
               className="flex items-center gap-1.5 text-xs cursor-pointer hover:opacity-70 transition-opacity"
@@ -304,11 +417,14 @@ function CommunityCard({
               <span className="opacity-60 shrink-0">{shortPath(n.file)}</span>
             </div>
           ))}
+          {community.nodes.length > 30 && (
+            <div className="text-xs text-text-muted pl-1">+{community.nodes.length - 30} more nodes</div>
+          )}
         </div>
       )}
     </div>
   );
-}
+});
 
 function MetricCard({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
   return (

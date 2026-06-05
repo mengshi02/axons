@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { ArrowLeftRight, Loader2, AlertCircle, Copy, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { PanelComponentProps } from '../lib/panelRegistry';
@@ -31,7 +31,7 @@ interface SequenceResponse {
     total_messages: number;
 }
 
-export function SequencePanel({ onClose: _onClose }: PanelComponentProps) {
+export const SequencePanel = React.memo(function SequencePanel({ onClose: _onClose }: PanelComponentProps) {
     const { t } = useTranslation('panels');
     const { currentProject } = useAppState();
     const [name, setName] = useState('');
@@ -209,4 +209,4 @@ export function SequencePanel({ onClose: _onClose }: PanelComponentProps) {
             </div>
         </div>
     );
-}
+});

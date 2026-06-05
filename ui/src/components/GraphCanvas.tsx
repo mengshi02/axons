@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { useSigma } from '../hooks/useSigma';
 import { useFPSMonitor } from '../hooks/useFPSMonitor';
@@ -10,7 +10,7 @@ interface GraphCanvasProps {
   onNodeClick?: (nodeId: string) => void;
 }
 
-export function GraphCanvas({ onNodeClick }: GraphCanvasProps) {
+export const GraphCanvas = React.memo(function GraphCanvas({ onNodeClick }: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { graph: graphData, isLoading, selectedNode, setSelectedNode, openCodePanel, pendingDelta, applyDelta, applyDeltaToKnowledgeGraph, setVisibleLabels, layoutMode, setLayoutMode } = useAppState();
 
@@ -472,4 +472,4 @@ export function GraphCanvas({ onNodeClick }: GraphCanvasProps) {
       )}
     </div>
   );
-}
+});

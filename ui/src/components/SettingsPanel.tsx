@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Settings, Loader2, Check, AlertCircle, Key, Database, Cpu, RefreshCw, Sun, Moon, Plus, Trash2, ChevronDown, ChevronUp, Globe } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import i18n, { switchLocale } from '../i18n';
@@ -72,7 +72,7 @@ const EMBEDDING_MODELS: Record<string, string[]> = {
     jina: ['jina-embeddings-v2-base-en', 'jina-embeddings-v2-base-code'],
 };
 
-export function SettingsPanel({ onClose }: PanelComponentProps) {
+export const SettingsPanel = React.memo(function SettingsPanel({ onClose }: PanelComponentProps) {
     const { theme, setTheme } = useTheme();
     const { t } = useTranslation('settings');
     const [activeTab, setActiveTab] = useState<'theme' | 'embedding' | 'llm' | 'rerank' | 'rag' | 'language'>('theme');
@@ -1296,7 +1296,7 @@ export function SettingsPanel({ onClose }: PanelComponentProps) {
 
         </Modal>
     );
-}
+});
 
 // ---- LLMModelForm sub-component ----
 interface LLMModelFormProps {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { X, ChevronRight, Copy, Check, Search, View, Code2, Pencil, Save, RotateCcw, Terminal } from 'lucide-react';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -72,7 +72,7 @@ const MIN_WIDTH = 320;
 const MAX_WIDTH = 800;
 const DEFAULT_WIDTH = 384; // w-96
 
-export function CodeReferencesPanel({ onClose: _onClose }: PanelComponentProps) {
+export const CodeReferencesPanel = React.memo(function CodeReferencesPanel({ onClose: _onClose }: PanelComponentProps) {
   const { t } = useTranslation('panels');
   const {
     graph,
@@ -118,19 +118,24 @@ export function CodeReferencesPanel({ onClose: _onClose }: PanelComponentProps) 
   // Pre-computed Set for O(1) lookup in virtual rendering
   const searchResultSet = useMemo(() => new Set(searchResultsList), [searchResultsList]);
 
-  // Resizable width
+  // Resizable width — direct DOM writes during drag (bypass React re-renders per frame).
+  // Only setState on mouseup to sync the final width back to React.
   const [panelWidth, setPanelWidth] = useState(DEFAULT_WIDTH);
   const isResizing = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(DEFAULT_WIDTH);
+  const pendingWidthRef = useRef(DEFAULT_WIDTH);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   const handleResizeMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     isResizing.current = true;
     startX.current = e.clientX;
     startWidth.current = panelWidth;
+    pendingWidthRef.current = panelWidth;
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
+    document.body.classList.add('axons-resizing');
   };
 
   useEffect(() => {
@@ -139,13 +144,20 @@ export function CodeReferencesPanel({ onClose: _onClose }: PanelComponentProps) 
       // drag handle on left side, drag left to increase width
       const delta = startX.current - e.clientX;
       const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth.current + delta));
-      setPanelWidth(newWidth);
+      pendingWidthRef.current = newWidth;
+      // Write directly to DOM — bypasses React re-render per frame
+      if (panelRef.current) {
+        panelRef.current.style.width = `${newWidth}px`;
+      }
     };
     const onMouseUp = () => {
       if (!isResizing.current) return;
       isResizing.current = false;
+      // Sync the final width back to React state
+      setPanelWidth(pendingWidthRef.current);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      document.body.classList.remove('axons-resizing');
     };
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
@@ -506,8 +518,9 @@ export function CodeReferencesPanel({ onClose: _onClose }: PanelComponentProps) 
   if (!nodeData && !activeFilePath && !codeLoading) {
     return (
       <div
+        ref={panelRef}
         className="h-full shrink-0 bg-surface border-l border-border-subtle flex flex-col overflow-hidden relative"
-        style={{ width: panelWidth }}
+        style={{ width: panelWidth, willChange: 'width' }}
       >
         {/* Resize handle */}
         <div
@@ -536,8 +549,9 @@ export function CodeReferencesPanel({ onClose: _onClose }: PanelComponentProps) 
 
   return (
     <div
+      ref={panelRef}
       className="h-full shrink-0 bg-surface border-l border-border-subtle flex flex-col overflow-hidden relative"
-      style={{ width: panelWidth }}
+      style={{ width: panelWidth, willChange: 'width' }}
     >
       {/* Resize handle */}
       <div
@@ -853,4 +867,4 @@ export function CodeReferencesPanel({ onClose: _onClose }: PanelComponentProps) 
       </div>
     </div>
   );
-}
+});

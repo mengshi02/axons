@@ -201,7 +201,6 @@ pre > code {
 body.axons-resizing iframe {
   pointer-events: none;
 }
-
 /* ═══════════════════════════════════════════════════════════════
    .xterm-container 是 absolute inset-0，自身有确定宽高。
    .xterm 相对它做 position:absolute; bottom:0 ——

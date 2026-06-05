@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { X, Radar, RefreshCw, Search, ChevronRight, ArrowRight, GitBranch } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   fetchImpact, fetchCallChain,
   type ImpactResponse, type CallChainResponse, type NodeRef,
@@ -10,7 +11,7 @@ import type { PanelComponentProps } from '../lib/panelRegistry';
 
 type Tab = 'impact' | 'callchain';
 
-export function ImpactAnalysisPanel({ onClose, onSelectNode }: PanelComponentProps) {
+export const ImpactAnalysisPanel = React.memo(function ImpactAnalysisPanel({ onClose, onSelectNode }: PanelComponentProps) {
   const { t } = useTranslation('panels');
   const { selectedNode, graph, currentProject } = useAppState();
   const [activeTab, setActiveTab] = useState<Tab>('impact');
@@ -87,6 +88,22 @@ export function ImpactAnalysisPanel({ onClose, onSelectNode }: PanelComponentPro
     return impactData.by_depth[activeDepth] || [];
   };
 
+  // Use ref for onSelectNode so virtualized rows don't need it as dependency
+  const onSelectNodeRef = useRef(onSelectNode);
+  onSelectNodeRef.current = onSelectNode;
+
+  const displayedNodes = useMemo(() => getDisplayedNodes(), [impactData, activeDepth]);
+
+  // ─── Virtual list for impact nodes ──────────────────────────────────────
+  const impactScrollRef = useRef<HTMLDivElement>(null);
+  const impactVirtualizer = useVirtualizer({
+    count: displayedNodes.length,
+    getScrollElement: () => impactScrollRef.current,
+    estimateSize: () => 52,
+    overscan: 10,
+    measureElement: (el) => el.getBoundingClientRect().height,
+  });
+
   // Simple node search for call chain
   const searchNodes = (query: string) => {
     if (!graph || !query.trim()) return [];
@@ -96,7 +113,7 @@ export function ImpactAnalysisPanel({ onClose, onSelectNode }: PanelComponentPro
   };
 
   return (
-    <div className="w-full bg-surface flex flex-col overflow-hidden">
+    <div className="w-full bg-surface flex flex-col overflow-hidden" style={{ contain: 'layout style' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle">
         <div className="flex items-center gap-2">
@@ -136,10 +153,10 @@ export function ImpactAnalysisPanel({ onClose, onSelectNode }: PanelComponentPro
       )}
 
       {/* Content */}
-      <div className="overflow-y-auto max-h-80">
+      <div>
         {/* Impact Tab */}
         {activeTab === 'impact' && (
-          <div className="p-4 space-y-4">
+          <div ref={impactScrollRef} className="overflow-y-auto max-h-80 p-4 space-y-4">
             {/* Context & controls */}
             <div className="space-y-2">
               {selectedNodeName ? (
@@ -228,27 +245,51 @@ export function ImpactAnalysisPanel({ onClose, onSelectNode }: PanelComponentPro
                   </div>
                 </div>
 
-                {/* Node list */}
-                <div className="space-y-1.5">
-                  {getDisplayedNodes().length === 0 ? (
+                {/* Node list — VIRTUALIZED */}
+                <div>
+                  {displayedNodes.length === 0 ? (
                     <div className="text-xs text-text-muted text-center py-4">No impacted nodes at this depth</div>
                   ) : (
-                    getDisplayedNodes().map((n) => (
                       <div
-                        key={n.id}
-                        className="flex items-center gap-2 px-3 py-2 bg-elevated rounded border border-border-subtle hover:border-orange-400/40 cursor-pointer transition-colors"
-                        onClick={() => onSelectNode?.(String(n.id))}
+                        style={{
+                          height: `${impactVirtualizer.getTotalSize()}px`,
+                          width: '100%',
+                          position: 'relative',
+                        }}
                       >
-                        <ChevronRight className="w-3 h-3 text-orange-400 shrink-0" />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-medium text-text-primary truncate">{n.name}</span>
-                            <span className="text-xs px-1 bg-accent/10 text-accent rounded shrink-0">{n.kind}</span>
-                          </div>
-                          <div className="text-xs text-text-muted truncate">{shortPath(n.file)}{n.line ? `:${n.line}` : ''}</div>
-                        </div>
+                        {impactVirtualizer.getVirtualItems().map((virtualRow) => {
+                          const n = displayedNodes[virtualRow.index];
+                          return (
+                            <div
+                              key={n.id}
+                              data-index={virtualRow.index}
+                              ref={impactVirtualizer.measureElement}
+                              className="pb-1.5"
+                              style={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                width: '100%',
+                                transform: `translateY(${virtualRow.start}px)`,
+                              }}
+                            >
+                              <div
+                                className="flex items-center gap-2 px-3 py-2 bg-elevated rounded border border-border-subtle hover:border-orange-400/40 cursor-pointer transition-colors"
+                                onClick={() => onSelectNodeRef.current?.(String(n.id))}
+                              >
+                                <ChevronRight className="w-3 h-3 text-orange-400 shrink-0" />
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs font-medium text-text-primary truncate">{n.name}</span>
+                                    <span className="text-xs px-1 bg-accent/10 text-accent rounded shrink-0">{n.kind}</span>
+                                  </div>
+                                  <div className="text-xs text-text-muted truncate">{shortPath(n.file)}{n.line ? `:${n.line}` : ''}</div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    ))
                   )}
                 </div>
               </>
@@ -258,7 +299,7 @@ export function ImpactAnalysisPanel({ onClose, onSelectNode }: PanelComponentPro
 
         {/* Call Chain Tab */}
         {activeTab === 'callchain' && (
-          <div className="p-4 space-y-4">
+          <div className="overflow-y-auto max-h-80 p-4 space-y-4">
             <div className="text-xs text-text-muted">
               Find all call paths between two functions
             </div>
@@ -335,7 +376,7 @@ export function ImpactAnalysisPanel({ onClose, onSelectNode }: PanelComponentPro
       </div>
     </div>
   );
-}
+});
 
 // ─── NodeSearchInput ──────────────────────────────────────────────────────────
 

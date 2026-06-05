@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, RefreshCw, GitBranch, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAppState } from '../hooks/useAppState';
@@ -27,7 +27,7 @@ interface ProcessStep {
   node_line: number;
 }
 
-export function ProcessPanel({ onClose }: PanelComponentProps) {
+export const ProcessPanel = React.memo(function ProcessPanel({ onClose }: PanelComponentProps) {
   const { t } = useTranslation('panels');
   const { currentProject } = useAppState();
   const [processes, setProcesses] = useState<ProcessRecord[]>([]);
@@ -197,4 +197,4 @@ export function ProcessPanel({ onClose }: PanelComponentProps) {
         </div>
     </Modal>
   );
-}
+});

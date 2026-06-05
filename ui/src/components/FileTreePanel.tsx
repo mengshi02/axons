@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   ChevronRight, ChevronDown, Folder, FolderOpen,
   FileCode, File, FileJson, FileText, Braces, Settings,
@@ -439,7 +439,7 @@ function TreeNodeItem({
 
 // ─── Main panel ──────────────────────────────────────────────────────────────
 
-export function FileTreePanel({ onSelectNode: _onSelectNode }: PanelComponentProps) {
+export const FileTreePanel = React.memo(function FileTreePanel({ onSelectNode: _onSelectNode }: PanelComponentProps) {
   const { t } = useTranslation('activitybar');
   const {
     currentProject, openCodePanel,
@@ -1556,7 +1556,7 @@ export function FileTreePanel({ onSelectNode: _onSelectNode }: PanelComponentPro
       {/* Tree */}
       <div
         className="flex-1 overflow-y-auto py-1 scrollbar-thin"
-        style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}
+        style={{ contain: 'content', '--wails-draggable': 'no-drag' } as React.CSSProperties}
         onClick={(e) => {
           // Only clear selection when clicking the blank area of the tree container,
           // not when clicking on a tree node (which has its own onClick handler).
@@ -1639,4 +1639,4 @@ export function FileTreePanel({ onSelectNode: _onSelectNode }: PanelComponentPro
       />
     </div>
   );
-}
+});

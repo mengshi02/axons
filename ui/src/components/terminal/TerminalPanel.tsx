@@ -187,7 +187,7 @@ const TERMINAL_THEMES = {
   },
 };
 
-export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
+export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: PanelComponentProps) {
   const { t } = useTranslation('activitybar');
   const { currentProject } = useAppState();
   const cwd = currentProject?.root_path || '/';
@@ -1171,14 +1171,14 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       )}
 
       {/* Header with tabs */}
-      <div className="flex items-center justify-between px-4 py-2 bg-surface border-b border-border-subtle flex-shrink-0">
+      <div className="flex items-center justify-between px-4 py-1 bg-surface border-b border-border-subtle flex-shrink-0">
         <div className="flex items-center gap-2 flex-1 overflow-x-auto">
           {/* Tabs */}
           {tabs.map(tab => (
             <div
               key={tab.id}
               onClick={() => switchTab(tab.id)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-t text-sm cursor-pointer transition-colors ${activeTabId === tab.id
+              className={`flex items-center gap-2 px-3 py-1 rounded-t text-sm cursor-pointer transition-colors ${activeTabId === tab.id
                 ? 'bg-elevated text-text-primary'
                 : 'bg-surface text-text-muted hover:text-text-secondary'
                 }`}
@@ -1320,4 +1320,4 @@ export const TerminalPanel: React.FC<PanelComponentProps> = ({ onClose }) => {
       )}
     </div>
   );
-};
+});

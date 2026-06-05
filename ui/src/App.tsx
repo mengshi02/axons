@@ -335,19 +335,34 @@ function App() {
     : buildingProjects.size > 0;
 
   // Dynamic panel rendering helper
+  // Stable notification panel callbacks — prevents TopSearchBar React.memo from
+  // failing shallow comparison on every App re-render.
+  const toggleNotificationPanel = useCallback(() => setIsNotificationPanelOpen(prev => !prev), []);
+  const closeNotificationPanel = useCallback(() => setIsNotificationPanelOpen(false), []);
+
+  // Stable onClose callbacks per panelId — avoids creating new arrow functions
+  // on every render, which would defeat React.memo shallow comparison.
+  const onCloseCache = useRef<Record<string, () => void>>({});
+  const getOnClose = useCallback((panelId: string) => {
+    if (!onCloseCache.current[panelId]) {
+      onCloseCache.current[panelId] = () => closePanel(panelId);
+    }
+    return onCloseCache.current[panelId];
+  }, [closePanel]);
+
   const renderPanel = (panelId: string) => {
     const def = panelRegistry.get(panelId);
     if (!def) return null;
 
     // Plugin panel with async loader
     if (def.asyncLoader) {
-      return <IframePluginPanel key={panelId} def={def} onClose={() => closePanel(panelId)} />;
+      return <IframePluginPanel key={panelId} def={def} onClose={getOnClose(panelId)} />;
     }
 
     // Built-in panel with synchronous component
     const Component = def.component;
     if (!Component) return null;
-    return <Component key={panelId} onClose={() => closePanel(panelId)} panelId={panelId} onSelectNode={handleNodeClick} />;
+    return <Component key={panelId} onClose={getOnClose(panelId)} panelId={panelId} onSelectNode={handleNodeClick} />;
   };
 
   // Panels by location
@@ -457,11 +472,11 @@ function App() {
         notifications={notificationList}
         unreadCount={unreadCount}
         isPanelOpen={isNotificationPanelOpen}
-        onTogglePanel={() => setIsNotificationPanelOpen(prev => !prev)}
+        onTogglePanel={toggleNotificationPanel}
         onMarkRead={markAsRead}
         onMarkAllRead={markAllAsRead}
         onDeleteNotification={deleteNotificationAction}
-        onClosePanel={() => setIsNotificationPanelOpen(false)}
+        onClosePanel={closeNotificationPanel}
         onOpenPanel={openPanel}
       />
 
@@ -522,7 +537,7 @@ function App() {
         )}
 
         {/* Center column: Graph canvas + center-bottom panels (overlaid) */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative" style={{ contain: 'layout style' }}>
           {/* Graph canvas — always takes full height; terminal overlays it */}
           <div className={`flex-1 relative ${hasCenterBottomPanel ? '' : 'min-h-0'}`}>
             {graph ? (
