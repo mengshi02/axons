@@ -1,5 +1,5 @@
 import { Search, FileText, Loader2 } from 'lucide-react';
-import { useAppState } from '../hooks/useAppState';
+import { useAppStateSelector } from '../hooks/useAppStateSelector';
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useIframePointerEvents } from '../hooks/useIframePointerEvents';
@@ -43,7 +43,11 @@ export const TopSearchBar = React.memo(function TopSearchBar({ onFocusNode, noti
         graph,
         openCodePanel,
         currentProject,
-    } = useAppState();
+    } = useAppStateSelector(s => ({
+        graph: s.graph,
+        openCodePanel: s.openCodePanel,
+        currentProject: s.currentProject,
+    }));
 
     const [searchMode, setSearchMode] = useState<SearchMode>('node');
     const [searchQuery, setSearchQuery] = useState('');

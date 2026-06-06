@@ -227,6 +227,18 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
 
+  // Throttle state for high-frequency events (build_progress, embed_progress)
+  // These events can fire 20-50x/sec but UI only needs ~5 updates/sec for progress bars
+  const lastProgressFireRef = useRef(0);
+  const pendingProgressRef = useRef<BuildProgressEvent | null>(null);
+  const progressRafRef = useRef<number | null>(null);
+
+  const lastEmbedProgressFireRef = useRef(0);
+  const pendingEmbedProgressRef = useRef<EmbedProgressEvent | null>(null);
+  const embedProgressRafRef = useRef<number | null>(null);
+
+  const PROGRESS_THROTTLE_MS = 150; // ~6-7 updates/sec — smooth enough for progress bars
+
   const connect = useCallback(() => {
     if (!enabled || eventSourceRef.current) return;
 
@@ -269,7 +281,27 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
     eventSource.addEventListener('build_progress', (e: MessageEvent) => {
       try {
         const event = JSON.parse(e.data) as Event;
-        callbacksRef.current.onBuildProgress?.(event.data as unknown as BuildProgressEvent);
+        const data = event.data as unknown as BuildProgressEvent;
+        // Throttle: only fire callback at most once per PROGRESS_THROTTLE_MS
+        const now = Date.now();
+        if (now - lastProgressFireRef.current >= PROGRESS_THROTTLE_MS) {
+          lastProgressFireRef.current = now;
+          callbacksRef.current.onBuildProgress?.(data);
+        } else {
+          // Save latest data and schedule a flush
+          pendingProgressRef.current = data;
+          if (!progressRafRef.current) {
+            progressRafRef.current = requestAnimationFrame(() => {
+              progressRafRef.current = null;
+              const pending = pendingProgressRef.current;
+              if (pending) {
+                pendingProgressRef.current = null;
+                lastProgressFireRef.current = Date.now();
+                callbacksRef.current.onBuildProgress?.(pending);
+              }
+            });
+          }
+        }
       } catch (err) {
         console.error('Failed to parse build_progress event:', err);
       }
@@ -332,7 +364,26 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
     eventSource.addEventListener('embed_progress', (e: MessageEvent) => {
       try {
         const event = JSON.parse(e.data) as Event;
-        callbacksRef.current.onEmbedProgress?.(event.data as unknown as EmbedProgressEvent);
+        const data = event.data as unknown as EmbedProgressEvent;
+        // Throttle: only fire callback at most once per PROGRESS_THROTTLE_MS
+        const now = Date.now();
+        if (now - lastEmbedProgressFireRef.current >= PROGRESS_THROTTLE_MS) {
+          lastEmbedProgressFireRef.current = now;
+          callbacksRef.current.onEmbedProgress?.(data);
+        } else {
+          pendingEmbedProgressRef.current = data;
+          if (!embedProgressRafRef.current) {
+            embedProgressRafRef.current = requestAnimationFrame(() => {
+              embedProgressRafRef.current = null;
+              const pending = pendingEmbedProgressRef.current;
+              if (pending) {
+                pendingEmbedProgressRef.current = null;
+                lastEmbedProgressFireRef.current = Date.now();
+                callbacksRef.current.onEmbedProgress?.(pending);
+              }
+            });
+          }
+        }
       } catch (err) {
         console.error('Failed to parse embed_progress event:', err);
       }

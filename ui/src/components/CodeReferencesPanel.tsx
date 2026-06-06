@@ -86,6 +86,7 @@ export const CodeReferencesPanel = React.memo(function CodeReferencesPanel({ onC
     getCachedFile,
     setCachedFile,
     activeFilePath,
+    fileCacheVersion,
   } = useAppState();
 
   const { theme } = useTheme();
@@ -126,6 +127,8 @@ export const CodeReferencesPanel = React.memo(function CodeReferencesPanel({ onC
   const startWidth = useRef(DEFAULT_WIDTH);
   const pendingWidthRef = useRef(DEFAULT_WIDTH);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  // rAF scheduling — coalesce mousemove events into one DOM write per frame.
+  const rafIdRef = useRef<number | null>(null);
 
   const handleResizeMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -133,37 +136,71 @@ export const CodeReferencesPanel = React.memo(function CodeReferencesPanel({ onC
     startX.current = e.clientX;
     startWidth.current = panelWidth;
     pendingWidthRef.current = panelWidth;
+    // Promote to GPU layer only during drag
+    if (panelRef.current) panelRef.current.style.willChange = 'width';
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
     document.body.classList.add('axons-resizing');
   };
 
   useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => {
-      if (!isResizing.current) return;
-      // drag handle on left side, drag left to increase width
-      const delta = startX.current - e.clientX;
-      const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth.current + delta));
-      pendingWidthRef.current = newWidth;
-      // Write directly to DOM — bypasses React re-render per frame
+    const flush = () => {
+      rafIdRef.current = null;
       if (panelRef.current) {
-        panelRef.current.style.width = `${newWidth}px`;
+        panelRef.current.style.width = `${pendingWidthRef.current}px`;
       }
     };
-    const onMouseUp = () => {
+    const finishDrag = () => {
       if (!isResizing.current) return;
       isResizing.current = false;
+      // Cancel any pending rAF — we'll write the final value directly below
+      if (rafIdRef.current != null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      // Remove GPU layer promotion after drag
+      if (panelRef.current) panelRef.current.style.willChange = '';
+      // Ensure the final width is painted
+      if (panelRef.current) {
+        panelRef.current.style.width = `${pendingWidthRef.current}px`;
+      }
       // Sync the final width back to React state
       setPanelWidth(pendingWidthRef.current);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       document.body.classList.remove('axons-resizing');
     };
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isResizing.current) return;
+      // drag handle on left side, drag left to increase width
+      const delta = startX.current - e.clientX;
+      const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth.current + delta));
+      pendingWidthRef.current = newWidth;
+      // Schedule at most one DOM write per animation frame
+      if (rafIdRef.current == null) {
+        rafIdRef.current = requestAnimationFrame(flush);
+      }
+    };
+    const onMouseUp = () => finishDrag();
+    // Fallback: abort drag if window loses focus (e.g. Alt+Tab while dragging)
+    const onBlur = () => finishDrag();
+    // Fallback: abort drag if pointer leaves the document entirely
+    const onMouseLeave = (e: MouseEvent) => {
+      if (e.relatedTarget === null) finishDrag();
+    };
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('blur', onBlur);
+    document.addEventListener('mouseleave', onMouseLeave);
     return () => {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('mouseleave', onMouseLeave);
+      if (rafIdRef.current != null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
     };
   }, []);
 
@@ -296,7 +333,7 @@ export const CodeReferencesPanel = React.memo(function CodeReferencesPanel({ onC
       })
       .catch(() => setCodeContent(null))
       .finally(() => setCodeLoading(false));
-  }, [nodeFileInfo, activeFilePath, setCodeContent, setCodeLoading, currentProject?.id, getCachedFile, setCachedFile]);
+  }, [nodeFileInfo, activeFilePath, setCodeContent, setCodeLoading, currentProject?.id, getCachedFile, setCachedFile, fileCacheVersion]);
 
   // Sync highlightRange and codeContent when activeFilePath changes.
   // Bug fix: when switching from graph node to file tree, highlightRange was stale;
@@ -326,7 +363,7 @@ export const CodeReferencesPanel = React.memo(function CodeReferencesPanel({ onC
         setCodeContent(cached);
       }
     }
-  }, [activeFilePath, nodeFileInfo, setHighlightRange, setCodeContent, getCachedFile]);
+  }, [activeFilePath, nodeFileInfo, setHighlightRange, setCodeContent, getCachedFile, fileCacheVersion]);
 
   // Scroll to highlighted line when code content loads or highlight range changes
   useEffect(() => {
@@ -520,14 +557,15 @@ export const CodeReferencesPanel = React.memo(function CodeReferencesPanel({ onC
       <div
         ref={panelRef}
         className="h-full shrink-0 bg-surface border-l border-border-subtle flex flex-col overflow-hidden relative"
-        style={{ width: panelWidth, willChange: 'width' }}
+        style={{ width: panelWidth, contain: 'layout style' }}
       >
-        {/* Resize handle */}
+        {/* Resize handle — VS Code sash style: 4px hit area, transparent by default, full accent on hover */}
         <div
-          className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize z-10 group hover:bg-accent/40 transition-colors"
+          className="absolute left-0 top-0 bottom-0 cursor-col-resize z-10 group"
+          style={{ width: '4px' }}
           onMouseDown={handleResizeMouseDown}
         >
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 rounded-full bg-border-subtle group-hover:bg-accent/60 transition-colors" />
+          <div className="absolute left-0 top-0 bottom-0 opacity-0 group-hover:opacity-100 transition-opacity bg-accent" style={{ width: '4px' }} />
         </div>
         {/* Header */}
         <div className="flex items-center justify-between px-3 py-2 h-[38px] border-b border-border-subtle">
@@ -551,13 +589,16 @@ export const CodeReferencesPanel = React.memo(function CodeReferencesPanel({ onC
     <div
       ref={panelRef}
       className="h-full shrink-0 bg-surface border-l border-border-subtle flex flex-col overflow-hidden relative"
-      style={{ width: panelWidth, willChange: 'width' }}
+      style={{ width: panelWidth, contain: 'layout style' }}
     >
-      {/* Resize handle */}
+      {/* Resize handle — VS Code sash style: 4px hit area, transparent by default, full accent on hover */}
       <div
-        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize z-10 hover:bg-accent/30 transition-colors"
+        className="absolute left-0 top-0 bottom-0 cursor-col-resize z-10 group"
+        style={{ width: '4px' }}
         onMouseDown={handleResizeMouseDown}
-      />
+      >
+        <div className="absolute left-0 top-0 bottom-0 opacity-0 group-hover:opacity-100 transition-opacity bg-accent" style={{ width: '4px' }} />
+      </div>
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 h-[38px] border-b border-border-subtle">
         <div className="flex items-center gap-2 min-w-0">

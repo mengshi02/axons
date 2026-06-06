@@ -334,7 +334,7 @@ func (s *Session) AddOnExit(fn func(code int)) {
 // Returns a channel that will receive output entries and the current sequence number.
 // The subscriber must call Unsubscribe when done to prevent leaks.
 func (s *Session) Subscribe(subscriberID string) (<-chan OutputEntry, uint64) {
-	ch := make(chan OutputEntry, 256)
+	ch := make(chan OutputEntry, 4096)
 	s.outputMu.Lock()
 	s.outputSubs[subscriberID] = ch
 	currentSeq := s.outputSeq
@@ -354,6 +354,11 @@ func (s *Session) Unsubscribe(subscriberID string) {
 }
 
 // broadcastOutput sends output data to all subscribers and writes to ring buffer.
+//
+// Lock discipline: only lightweight non-blocking sends are performed under
+// outputMu. If a subscriber's channel is full, we record it and retry outside
+// the lock with a short timeout. This prevents a slow subscriber from
+// blocking the entire broadcast path (ringBuf writes, other subscribers, etc.).
 func (s *Session) broadcastOutput(data []byte) {
 	s.outputMu.Lock()
 	seq := s.outputSeq + 1
@@ -362,17 +367,32 @@ func (s *Session) broadcastOutput(data []byte) {
 	entry := OutputEntry{Seq: seq, Data: data}
 	s.ringBuf.Write(entry)
 
-	for id, ch := range s.outputSubs {
+	// Non-blocking send to each subscriber under the lock.
+	// Record any subscriber whose channel was full for retry outside the lock.
+	var blocked []chan OutputEntry
+	for _, ch := range s.outputSubs {
 		select {
 		case ch <- entry:
 		default:
-			// Subscriber channel full, drop message (subscriber is too slow)
-			zap.L().Debug("Output subscriber channel full, dropping message",
-				zap.String("sessionID", s.ID),
-				zap.String("subscriberID", id))
+			blocked = append(blocked, ch)
 		}
 	}
 	s.outputMu.Unlock()
+
+	// Outside the lock: retry blocked subscribers with a short timeout.
+	// This applies backpressure (outputLoop stalls → PTY buffer fills →
+	// cat/ls throttles) without holding the lock.
+	if len(blocked) > 0 {
+		const writeTimeout = 5 * time.Second
+		for _, ch := range blocked {
+			select {
+			case ch <- entry:
+			case <-time.After(writeTimeout):
+				zap.L().Warn("Output subscriber channel full after timeout, dropping message",
+					zap.String("sessionID", s.ID))
+			}
+		}
+	}
 }
 
 // ReplaySince returns buffered output entries with seq > sinceSeq for reconnection replay.
@@ -445,36 +465,108 @@ func (s *Session) monitorExit(process *os.Process) {
 
 // outputLoop reads from the PTY and broadcasts output to all subscribers.
 // This runs in its own goroutine and decouples PTY output from WebSocket lifecycle.
+//
+// Coalescing strategy (adaptive, zero-cost for interactive input):
+//   1. A reader goroutine reads from the PTY (blocking) and sends chunks to readCh.
+//   2. The main loop reads the first chunk from readCh.
+//   3. Non-blocking drain: if more chunks are immediately available, this is bulk
+//      output (cat/ls) — keep draining, then wait 2ms for the kernel to batch
+//      more PTY data, drain once more, and broadcast the accumulated payload.
+//   4. If no more chunks are immediately available, this is interactive input —
+//      broadcast the single chunk immediately with zero added latency.
 func (s *Session) outputLoop() {
-	buf := make([]byte, 4096)
-	for {
-		// Check if session is still running
-		if !s.isRunning() {
-			return
-		}
+	const (
+		readBufSize   = 4096                // per-read buffer size
+		readChCap     = 64                   // read channel capacity (chunks)
+		coalesceDelay = 2 * time.Millisecond // wait for more data before broadcast
+		maxAccumSize  = 1048576              // 1 MB safety limit per broadcast
+	)
 
-		s.mu.RLock()
-		pty := s.pty
-		s.mu.RUnlock()
+	readBuf := make([]byte, readBufSize)
+	readCh := make(chan []byte, readChCap)
 
-		if pty == nil {
-			return
-		}
-
-		n, err := pty.Read(buf)
-		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				zap.L().Debug("PTY read ended", zap.String("id", s.ID), zap.Error(err))
+	// Reader goroutine: reads from PTY (blocking) and sends chunks to readCh.
+	// Exits when the PTY is closed (Read returns error) or session is closed.
+	go func() {
+		defer close(readCh)
+		for {
+			if !s.isRunning() {
+				return
 			}
-			return
+
+			s.mu.RLock()
+			p := s.pty
+			s.mu.RUnlock()
+
+			if p == nil {
+				return
+			}
+
+			n, err := p.Read(readBuf)
+			if err != nil {
+				if !errors.Is(err, io.EOF) {
+					zap.L().Debug("PTY read ended", zap.String("id", s.ID), zap.Error(err))
+				}
+				return
+			}
+
+			if n > 0 {
+				chunk := make([]byte, n)
+				copy(chunk, readBuf[:n])
+				readCh <- chunk
+			}
+		}
+	}()
+
+	// Main loop: read chunks from readCh, coalesce adaptively, and broadcast.
+	for chunk := range readCh {
+		accum := chunk
+
+		// Non-blocking drain: grab any immediately-available chunks.
+		draining := true
+		for draining && len(accum) < maxAccumSize {
+			select {
+			case more, ok := <-readCh:
+				if !ok {
+					draining = false
+					break
+				}
+				accum = append(accum, more...)
+			default:
+				draining = false
+			}
 		}
 
-		if n > 0 {
-			// Broadcast output to all subscribers and write to ring buffer
-			data := make([]byte, n)
-			copy(data, buf[:n])
-			s.broadcastOutput(data)
+		// If we drained extra chunks, this is bulk output — wait briefly
+		// for more data, then drain once more before broadcasting.
+		// If no extra chunks were available, this is interactive input —
+		// skip the wait and broadcast immediately (zero added latency).
+		if draining && len(accum) < maxAccumSize {
+			select {
+			case more, ok := <-readCh:
+				if ok {
+					accum = append(accum, more...)
+					// Final drain after the wait.
+					draining = true
+					for draining && len(accum) < maxAccumSize {
+						select {
+						case more2, ok2 := <-readCh:
+							if !ok2 {
+								draining = false
+								break
+							}
+							accum = append(accum, more2...)
+						default:
+							draining = false
+						}
+					}
+				}
+			case <-time.After(coalesceDelay):
+			}
 		}
+
+		// Broadcast accumulated output as a single entry.
+		s.broadcastOutput(accum)
 	}
 }
 

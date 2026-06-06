@@ -4,7 +4,7 @@ import {
     Shield, Workflow, Terminal, Code2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useAppState } from '../hooks/useAppState';
+import { useAppStateSelector } from '../hooks/useAppStateSelector';
 import React, { useState, useRef, useEffect, type ComponentType } from 'react';
 import { useIframePointerEvents } from '../hooks/useIframePointerEvents';
 import { ProjectSelector } from './ProjectSelector';
@@ -26,7 +26,12 @@ export const ActivityBar = React.memo(function ActivityBar(_props: ActivityBarPr
         togglePanel,
         openPanels,
         getPanelsByActivator,
-    } = useAppState();
+    } = useAppStateSelector(s => ({
+        openPanel: s.openPanel,
+        togglePanel: s.togglePanel,
+        openPanels: s.openPanels,
+        getPanelsByActivator: s.getPanelsByActivator,
+    }));
     const { t } = useTranslation();
 
     const [isHomeOpen, setIsHomeOpen] = useState(false);

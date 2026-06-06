@@ -59,18 +59,7 @@ export function IframePluginPanel({ def, onClose }: IframePluginPanelProps) {
       setPanelWidth(pendingWidthRef.current);
     };
 
-    const onMouseMove = (e: MouseEvent) => {
-      if (!isResizing.current) return;
-      // Right-docked panel: handle is on the LEFT edge. Drag LEFT (clientX decreases)
-      // should INCREASE width → delta = startX - currentX.
-      const delta = resizeStartX.current - e.clientX;
-      const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, resizeStartWidth.current + delta));
-      pendingWidthRef.current = next;
-      if (rafIdRef.current == null) {
-        rafIdRef.current = requestAnimationFrame(flush);
-      }
-    };
-    const onMouseUp = () => {
+    const finishDrag = () => {
       if (!isResizing.current) return;
       isResizing.current = false;
       // Ensure final width is committed even if a frame was pending.
@@ -83,11 +72,34 @@ export function IframePluginPanel({ def, onClose }: IframePluginPanelProps) {
       document.body.style.userSelect = '';
       document.body.classList.remove('axons-resizing');
     };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isResizing.current) return;
+      // Right-docked panel: handle is on the LEFT edge. Drag LEFT (clientX decreases)
+      // should INCREASE width → delta = startX - currentX.
+      const delta = resizeStartX.current - e.clientX;
+      const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, resizeStartWidth.current + delta));
+      pendingWidthRef.current = next;
+      if (rafIdRef.current == null) {
+        rafIdRef.current = requestAnimationFrame(flush);
+      }
+    };
+    const onMouseUp = () => finishDrag();
+    // Fallback: abort drag if window loses focus (e.g. Alt+Tab while dragging)
+    const onBlur = () => finishDrag();
+    // Fallback: abort drag if pointer leaves the document entirely
+    const onMouseLeave = (e: MouseEvent) => {
+      if (e.relatedTarget === null) finishDrag();
+    };
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('blur', onBlur);
+    document.addEventListener('mouseleave', onMouseLeave);
     return () => {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('mouseleave', onMouseLeave);
       if (rafIdRef.current != null) {
         cancelAnimationFrame(rafIdRef.current);
         rafIdRef.current = null;
@@ -183,12 +195,16 @@ export function IframePluginPanel({ def, onClose }: IframePluginPanelProps) {
   return (
     <div className={containerClass} style={containerStyle}>
       {/* Resize handle — only rendered for self-managed (right-docked) panels.
+          VS Code sash style: 4px hit area, transparent by default, full accent on hover.
           For left/left-top panels, the parent column owns the resize handle. */}
       {selfManagesWidth && (
         <div
-          className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize z-10 hover:bg-accent/30 transition-colors"
+          className="absolute left-0 top-0 bottom-0 cursor-col-resize z-10 group"
+          style={{ width: '4px' }}
           onMouseDown={handleResizeMouseDown}
-        />
+        >
+          <div className="absolute left-0 top-0 bottom-0 opacity-0 group-hover:opacity-100 transition-opacity bg-accent" style={{ width: '4px' }} />
+        </div>
       )}
       {!iframeReady && !iframeError && (
         <div className="flex-1 flex items-center justify-center">

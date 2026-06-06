@@ -5,9 +5,9 @@
  * for virtual scrolling. Only renders DOM for lines within the viewport,
  * providing O(1) rendering performance regardless of file size.
  */
-import { useMemo, useRef, useCallback, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { tokenizeToLines, buildStyleMap, getTokenStyle, type TokenLine, type SyntaxTheme } from '../lib/prism-virtual';
+import { tokenizeToLines, buildStyleMap, getTokenStyle, ensurePrismReady, type TokenLine, type SyntaxTheme } from '../lib/prism-virtual';
 
 interface VirtualCodeViewProps {
     /** Full source code content */
@@ -46,26 +46,33 @@ export function VirtualCodeView({
     const scrollRef = useRef<HTMLDivElement>(null);
 
     // Pre-compute style map from theme (cached by theme reference)
-    const styleMap = useMemo(() => buildStyleMap(theme), [theme]);
+    const styleMap = useRef(buildStyleMap(theme));
+    useEffect(() => { styleMap.current = buildStyleMap(theme); }, [theme]);
 
-    // Tokenize code into per-line token arrays (cached by code + language)
-    const tokenLines: TokenLine[] = useMemo(
-        () => tokenizeToLines(code, language),
-        [code, language]
-    );
+    // Tokenize code into per-line token arrays — async because Prism loads lazily
+    const [tokenLines, setTokenLines] = useState<TokenLine[]>([]);
+
+    useEffect(() => {
+        let cancelled = false;
+        tokenizeToLines(code, language).then(lines => {
+            if (!cancelled) setTokenLines(lines);
+        });
+        return () => { cancelled = true; };
+    }, [code, language]);
+
+    // Kick off Prism preloading on mount (parallel with first render)
+    useEffect(() => { ensurePrismReady(); }, []);
 
     // Line number color from theme
-    const lineNumberColor = useMemo(() => {
-        // Use the 'comment' color as a heuristic for line number color (like SyntaxHighlighter does)
-        const commentStyle = styleMap['comment'];
+    const lineNumberColor = (() => {
+        const commentStyle = styleMap.current['comment'];
         return commentStyle?.color || '#6b7280';
-    }, [styleMap]);
+    })();
 
     // Default text color from theme (for tokens without specific styling)
-    const defaultTextColor = useMemo(() => {
-        // 'default' is extracted from 'code[class*="language-"]' by buildStyleMap
-        return styleMap['default']?.color || '#abb2bf';
-    }, [styleMap]);
+    const defaultTextColor = (() => {
+        return styleMap.current['default']?.color || '#abb2bf';
+    })();
 
     // Create virtualizer
     const virtualizer = useVirtualizer({
@@ -88,7 +95,7 @@ export function VirtualCodeView({
     // Render a single token span
     const renderToken = useCallback(
         (token: TokenLine[number], idx: number) => {
-            const style = getTokenStyle(token.type, styleMap);
+            const style = getTokenStyle(token.type, styleMap.current);
             if (Object.keys(style).length === 0) {
                 // No special styling - render as plain text span
                 return <span key={idx}>{token.children}</span>;
@@ -101,6 +108,18 @@ export function VirtualCodeView({
         },
         [styleMap]
     );
+
+    // Show loading state while Prism initializes
+    if (tokenLines.length === 0 && code.length > 0) {
+        return (
+            <div
+                className="overflow-auto"
+                style={{ fontSize: '0.8125rem', fontFamily: 'monospace', height: '100%', color: defaultTextColor }}
+            >
+                <pre style={{ padding: '0.75rem', whiteSpace: 'pre' }}>{code}</pre>
+            </div>
+        );
+    }
 
     return (
         <div

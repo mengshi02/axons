@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { GitBranch, RotateCcw, Check, Eye, X, ChevronDown, ChevronRight } from 'lucide-react';
-import { useAppState } from '../hooks/useAppState';
+import { useAppStateSelector } from '../hooks/useAppStateSelector';
 import { useTranslation } from 'react-i18next';
 import { Modal } from './Modal';
 
@@ -35,7 +35,10 @@ interface ChangeListProps {
 
 export const ChangeList: React.FC<ChangeListProps> = ({ sessionId, projectId, refreshKey }) => {
   const { t } = useTranslation('panels');
-  const { reloadGraph, clearAllFileCache } = useAppState();
+  const { reloadGraph, clearAllFileCache } = useAppStateSelector(s => ({
+    reloadGraph: s.reloadGraph,
+    clearAllFileCache: s.clearAllFileCache,
+  }));
   const [changes, setChanges] = useState<Change[]>([]);
   const [isReverting, setIsReverting] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);

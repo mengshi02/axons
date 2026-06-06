@@ -1,8 +1,8 @@
-import React, { useEffect, useCallback, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useCallback, useState, useRef, useMemo, Suspense, lazy } from 'react';
 import { TopSearchBar } from './components/TopSearchBar';
 import { ActivityBar } from './components/ActivityBar';
 import { Footer } from './components/Footer';
-import { GraphCanvas } from './components/GraphCanvas';
+const GraphCanvas = lazy(() => import('./components/GraphCanvas').then(m => ({ default: m.GraphCanvas })));
 import { DropZone } from './components/DropZone';
 import { BuildingState } from './components/BuildingState';
 import { useAppState } from './hooks/useAppState';
@@ -12,6 +12,7 @@ import { useNotifications } from './hooks/useNotifications';
 import { NotificationToast } from './components/NotificationToast';
 import { fetchGraph, fetchGraphDelta, createProject, startBuild, fetchTaskStatus } from './services/api';
 import { IframePluginPanel } from './components/IframePluginPanel';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 function App() {
   const {
@@ -299,21 +300,40 @@ function App() {
   // Ref to the left panel DOM element — used for direct style writes during drag
   // to bypass React re-renders and keep dragging smooth.
   const leftPanelRef = useRef<HTMLDivElement | null>(null);
+  // rAF scheduling — coalesce mousemove events into one DOM write per frame.
+  const leftPanelRafIdRef = useRef<number | null>(null);
 
   useEffect(() => {
+    const flush = () => {
+      leftPanelRafIdRef.current = null;
+      if (leftPanelRef.current) {
+        leftPanelRef.current.style.width = `${leftPanelPendingWidthRef.current}px`;
+      }
+    };
     const onMouseMove = (e: MouseEvent) => {
       if (!isLeftPanelResizing.current) return;
       const delta = e.clientX - startX.current;
       const newWidth = Math.min(600, Math.max(200, startWidth.current + delta));
       leftPanelPendingWidthRef.current = newWidth;
-      // Write directly to DOM — bypasses React re-render per frame
-      if (leftPanelRef.current) {
-        leftPanelRef.current.style.width = `${newWidth}px`;
+      // Schedule at most one DOM write per animation frame
+      if (leftPanelRafIdRef.current == null) {
+        leftPanelRafIdRef.current = requestAnimationFrame(flush);
       }
     };
-    const onMouseUp = () => {
+    const finishDrag = () => {
       if (!isLeftPanelResizing.current) return;
       isLeftPanelResizing.current = false;
+      // Cancel any pending rAF — we'll write the final value directly below
+      if (leftPanelRafIdRef.current != null) {
+        cancelAnimationFrame(leftPanelRafIdRef.current);
+        leftPanelRafIdRef.current = null;
+      }
+      // Remove GPU layer promotion after drag
+      if (leftPanelRef.current) leftPanelRef.current.style.willChange = '';
+      // Ensure the final width is painted
+      if (leftPanelRef.current) {
+        leftPanelRef.current.style.width = `${leftPanelPendingWidthRef.current}px`;
+      }
       // Sync the final width back to React state so future renders use the correct value
       setLeftPanelWidth(leftPanelPendingWidthRef.current);
       document.body.style.cursor = '';
@@ -321,11 +341,26 @@ function App() {
       // Re-enable pointer events on any iframes inside the left column.
       document.body.classList.remove('axons-resizing');
     };
+    const onMouseUp = () => finishDrag();
+    // Fallback: abort drag if window loses focus (e.g. Alt+Tab while dragging)
+    const onBlur = () => finishDrag();
+    // Fallback: abort drag if pointer leaves the document entirely
+    const onMouseLeave = (e: MouseEvent) => {
+      if (e.relatedTarget === null) finishDrag();
+    };
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('blur', onBlur);
+    document.addEventListener('mouseleave', onMouseLeave);
     return () => {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('mouseleave', onMouseLeave);
+      if (leftPanelRafIdRef.current != null) {
+        cancelAnimationFrame(leftPanelRafIdRef.current);
+        leftPanelRafIdRef.current = null;
+      }
     };
   }, []);
 
@@ -359,10 +394,16 @@ function App() {
       return <IframePluginPanel key={panelId} def={def} onClose={getOnClose(panelId)} />;
     }
 
-    // Built-in panel with synchronous component
+    // Built-in panel with synchronous or lazy component
     const Component = def.component;
     if (!Component) return null;
-    return <Component key={panelId} onClose={getOnClose(panelId)} panelId={panelId} onSelectNode={handleNodeClick} />;
+    return (
+      <ErrorBoundary key={panelId}>
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" /></div>}>
+          <Component onClose={getOnClose(panelId)} panelId={panelId} onSelectNode={handleNodeClick} />
+        </Suspense>
+      </ErrorBoundary>
+    );
   };
 
   // Panels by location
@@ -458,6 +499,8 @@ function App() {
     leftPanelPendingWidthRef.current = leftPanelWidth;
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
+    // Promote to GPU layer only during drag
+    if (leftPanelRef.current) leftPanelRef.current.style.willChange = 'width';
     // Disable pointer events on iframes in the left column while resizing so
     // mousemove keeps firing on the host document (otherwise the iframe
     // swallows the events and dragging stutters / drops frames).
@@ -489,14 +532,17 @@ function App() {
         {hasLeftContent && (
         <div
             ref={leftPanelRef}
-            style={{ width: leftPanelWidth, willChange: 'width', contain: 'layout style' }}
+            style={{ width: leftPanelWidth, contain: 'layout style' }}
           className="h-full shrink-0 bg-surface border-r border-border-subtle flex flex-col overflow-hidden relative"
         >
-          {/* Resize handle on right side */}
+            {/* Resize handle on right side — VS Code sash style: 4px hit area, transparent by default, full accent on hover */}
           <div
-            className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize z-20 hover:bg-accent/30 transition-colors"
+              className="absolute right-0 top-0 bottom-0 cursor-col-resize z-20 group"
+              style={{ width: '4px' }}
             onMouseDown={handleLeftPanelResizeMouseDown}
-          />
+            >
+              <div className="absolute right-0 top-0 bottom-0 opacity-0 group-hover:opacity-100 transition-opacity bg-accent" style={{ width: '4px' }} />
+            </div>
 
             {/* ActivityBar non-footer left panels: always mounted, CSS controls visibility.
                 This keeps components like the AI chat alive when user switches to fileTree,
@@ -541,7 +587,11 @@ function App() {
           {/* Graph canvas — always takes full height; terminal overlays it */}
           <div className={`flex-1 relative ${hasCenterBottomPanel ? '' : 'min-h-0'}`}>
             {graph ? (
-              <GraphCanvas onNodeClick={handleNodeClick} />
+              <ErrorBoundary>
+                <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin" /></div>}>
+                  <GraphCanvas onNodeClick={handleNodeClick} />
+                </Suspense>
+              </ErrorBoundary>
             ) : isBuilding ? (
                 <BuildingState projectName={currentProject?.name} progress={buildProgress?.progress} phase={buildProgress?.phase} message={buildProgress?.message} />
             ) : loading ? (

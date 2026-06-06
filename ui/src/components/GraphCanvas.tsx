@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useMemo } from 'react';
+import { useAppStateSelector } from '../hooks/useAppStateSelector';
 import { useAppState } from '../hooks/useAppState';
 import { useSigma } from '../hooks/useSigma';
 import { useFPSMonitor } from '../hooks/useFPSMonitor';
@@ -12,7 +13,14 @@ interface GraphCanvasProps {
 
 export const GraphCanvas = React.memo(function GraphCanvas({ onNodeClick }: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const { graph: graphData, isLoading, selectedNode, setSelectedNode, openCodePanel, pendingDelta, applyDelta, applyDeltaToKnowledgeGraph, setVisibleLabels, layoutMode, setLayoutMode } = useAppState();
+  // Selective subscription: only re-render when graph/selection/filter fields change
+  const {
+    graph: graphData, selectedNode, pendingDelta, layoutMode, isLoading,
+  } = useAppStateSelector(s => ({
+    graph: s.graph, selectedNode: s.selectedNode, pendingDelta: s.pendingDelta, layoutMode: s.layoutMode, isLoading: s.isLoading,
+  }));
+  // Stable callbacks (don't change on every render) — read from full state
+  const { setSelectedNode, openCodePanel, applyDelta, applyDeltaToKnowledgeGraph, setVisibleLabels, setLayoutMode } = useAppState();
 
   // FPS monitoring — only enabled when graph is displayed
   const hasGraph = !!graphData && graphData.nodes.length > 0;

@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Modal } from './Modal';
+import { useAppStateSelector } from '../hooks/useAppStateSelector';
 import { useAppState } from '../hooks/useAppState';
 import type { PanelComponentProps } from '../lib/panelRegistry';
 import { semanticSearch, triggerEmbed, listChatSessions } from '../services/api';
@@ -131,10 +132,19 @@ export const RightPanel = React.memo(function RightPanel({ onClose }: PanelCompo
   const { t } = useTranslation('chat');
   const {
     graph, selectedNode,
-    agents, currentAgentId, setCurrentAgentId, currentProject,
-    clearFileCache, configVersion,
+    agents, currentAgentId, currentProject,
+    configVersion,
     openPanels,
-  } = useAppState();
+  } = useAppStateSelector(s => ({
+    graph: s.graph,
+    selectedNode: s.selectedNode,
+    agents: s.agents,
+    currentAgentId: s.currentAgentId,
+    currentProject: s.currentProject,
+    configVersion: s.configVersion,
+    openPanels: s.openPanels,
+  }));
+  const { setCurrentAgentId, clearFileCache } = useAppState();
 
   const [activeTab, setActiveTab] = useState<'chat' | 'search'>('chat');
 

@@ -5,6 +5,7 @@ import { fetchRepos, fetchGraph, fetchFile, fetchAgents, fetchProjectStats, fetc
 import { getBaseURL } from '../lib/config';
 import { useEventStream, type BuildProgressEvent } from './useEventStream';
 import { PanelRegistry, type PanelDef, type PanelLocation, type PanelActivator } from '../lib/panelRegistry';
+// Lightweight panels — static import (small bundle impact)
 import { CodeHealthPanel } from '../components/CodeHealthPanel';
 import { GraphAnalyticsPanel } from '../components/GraphAnalyticsPanel';
 import { ImpactAnalysisPanel } from '../components/ImpactAnalysisPanel';
@@ -12,14 +13,15 @@ import { CfgDataflowPanel } from '../components/CfgDataflowPanel';
 import { SequencePanel } from '../components/SequencePanel';
 import { ArchRulesPanel } from '../components/ArchRulesPanel';
 import { ProcessPanel } from '../components/ProcessPanel';
-import { RightPanel } from '../components/RightPanel';
 import { CodeReferencesPanel } from '../components/CodeReferencesPanel';
 import { FileTreePanel } from '../components/FileTreePanel';
 import { SettingsPanel } from '../components/SettingsPanel';
-import { TerminalPanel } from '../components/terminal';
 import { ExtensionsPanel } from '../components/ExtensionsPanel';
+// Heavy panels — lazy import (code-split into separate chunks)
+const LazyRightPanel = React.lazy(() => import('../components/RightPanel').then(m => ({ default: m.RightPanel })));
+const LazyTerminalPanel = React.lazy(() => import('../components/terminal').then(m => ({ default: m.TerminalPanel })));
 
-interface AppState {
+export interface AppState {
   // View state
   viewMode: 'onboarding' | 'loading' | 'exploring';
   setViewMode: (mode: 'onboarding' | 'loading' | 'exploring') => void;
@@ -56,7 +58,8 @@ interface AppState {
   // Graph state
   graph: KnowledgeGraph | null;
   setGraph: (graph: KnowledgeGraph | null) => void;
-  fileContents: Map<string, string>;
+  /** File cache version — incremented on every mutation so consumers can re-read from ref */
+  fileCacheVersion: number;
 
   // Graph delta state for incremental updates
   pendingDelta: GraphDeltaResponse | null;
@@ -173,7 +176,7 @@ interface AppState {
   // File backup management (removed - now handled by backend)
 }
 
-const AppContext = createContext<AppState | null>(null);
+export const AppContext = createContext<AppState | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   // View state
@@ -294,7 +297,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Graph state
   const [graph, setGraph] = useState<KnowledgeGraph | null>(null);
-  const [fileContents, setFileContents] = useState<Map<string, string>>(new Map());
+
+  // File cache — stored in a ref to avoid triggering React re-renders on every
+  // cache write.  Consumers that need to react to cache changes subscribe to
+  // `fileCacheVersion` (incremented on every mutation) instead of the Map itself.
+  const fileContentsRef = useRef<Map<string, string>>(new Map());
+  const [fileCacheVersion, setFileCacheVersion] = useState(0);
 
   // Graph delta state for incremental updates
   const [pendingDelta, setPendingDelta] = useState<GraphDeltaResponse | null>(null);
@@ -358,13 +366,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (fp && typeof fp === 'string') changedFilePaths.add(fp);
     }
     if (changedFilePaths.size > 0) {
-      setFileContents(prev => {
-        const next = new Map(prev);
-        for (const fp of changedFilePaths) {
-          next.delete(fp);
-        }
-        return next;
-      });
+      for (const fp of changedFilePaths) {
+        fileContentsRef.current.delete(fp);
+      }
+      setFileCacheVersion(v => v + 1);
     }
   }, []);
 
@@ -709,7 +714,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Reset state
       setSelectedNode(null);
       setCodeReferences([]);
-      setFileContents(new Map());
+      fileContentsRef.current.clear();
+      setFileCacheVersion(v => v + 1);
     } catch (err) {
       console.error('[useAppState] Failed to load graph:', err);
       setError(err instanceof Error ? err.message : 'Failed to load graph');
@@ -782,15 +788,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Load file content
   const loadFileContent = useCallback(async (filePath: string) => {
-    if (fileContents.has(filePath) || !currentRepo) return;
+    if (fileContentsRef.current.has(filePath) || !currentRepo) return;
 
     try {
       const content = await fetchFile(filePath, currentRepo.name);
-      setFileContents(prev => new Map(prev).set(filePath, content));
+      fileContentsRef.current.set(filePath, content);
+      setFileCacheVersion(v => v + 1);
     } catch (err) {
       console.error('Failed to load file:', err);
     }
-  }, [fileContents, currentRepo]);
+  }, [currentRepo]);
 
   // Toggle label visibility
   const toggleLabelVisibility = useCallback((label: NodeLabel) => {
@@ -831,27 +838,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // File cache management
   const getCachedFile = useCallback((filePath: string): string | undefined => {
-    return fileContents.get(filePath);
-  }, [fileContents]);
+    return fileContentsRef.current.get(filePath);
+  }, []);
 
   const setCachedFile = useCallback((filePath: string, content: string) => {
-    setFileContents(prev => {
-      const next = new Map(prev);
-      next.set(filePath, content);
-      return next;
-    });
+    fileContentsRef.current.set(filePath, content);
+    setFileCacheVersion(v => v + 1);
   }, []);
 
   const clearFileCache = useCallback((filePath: string) => {
-    setFileContents(prev => {
-      const next = new Map(prev);
-      next.delete(filePath);
-      return next;
-    });
+    fileContentsRef.current.delete(filePath);
+    setFileCacheVersion(v => v + 1);
   }, []);
 
   const clearAllFileCache = useCallback(() => {
-    setFileContents(new Map());
+    fileContentsRef.current.clear();
+    setFileCacheVersion(v => v + 1);
   }, []);
 
   // Legacy panel helpers — 转发到 panelRegistry
@@ -942,7 +944,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // --- activityBar 内置按钮 (order 0~9) ---
     registerPanel({ id: 'home', title: 'activitybar:projectsTitle', icon: 'Home', location: 'left-top', activator: 'activityBar', action: 'popup', order: 0 });
     registerPanel({ id: 'fileTree', title: 'activitybar:files', icon: 'FolderTree', location: 'left-top', activator: 'activityBar', component: FileTreePanel, order: 1 });
-    registerPanel({ id: 'rightPanel', title: 'panels:chat.newConversation', icon: 'Sparkles', location: 'left', activator: 'activityBar', component: RightPanel, order: 2 });
+    registerPanel({ id: 'rightPanel', title: 'panels:chat.newConversation', icon: 'Sparkles', location: 'left', activator: 'activityBar', component: LazyRightPanel, order: 2 });
 
     // --- footer 面板 ---
     registerPanel({ id: 'codeHealth', title: 'panels:codeHealth.title', icon: 'Activity', location: 'left', activator: 'footer', component: CodeHealthPanel, order: 0 });
@@ -952,7 +954,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     registerPanel({ id: 'sequencePanel', title: 'panels:sequence.title', icon: 'ArrowLeftRight', location: 'left', activator: 'footer', component: SequencePanel, order: 4 });
     registerPanel({ id: 'archRulesPanel', title: 'panels:rules.title', icon: 'Shield', location: 'modal', activator: 'footer', component: ArchRulesPanel, order: 5 });
     registerPanel({ id: 'processPanel', title: 'panels:flow.title', icon: 'Workflow', location: 'modal', activator: 'footer', component: ProcessPanel, order: 6 });
-    registerPanel({ id: 'terminal', title: 'activitybar:terminal.title', icon: 'Terminal', location: 'center-bottom', activator: 'footer', footerSlot: 'right', component: TerminalPanel, order: 7 });
+    registerPanel({ id: 'terminal', title: 'activitybar:terminal.title', icon: 'Terminal', location: 'center-bottom', activator: 'footer', footerSlot: 'right', component: LazyTerminalPanel, order: 7 });
 
     // --- node-select ---
     registerPanel({ id: 'codePanel', title: 'activitybar:code', icon: 'Code2', location: 'right', activator: 'node-select', component: CodeReferencesPanel, order: 1 });
@@ -1131,7 +1133,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLoading,
     graph,
     setGraph,
-    fileContents,
+    fileCacheVersion,
     pendingDelta,
     applyDelta,
     applyDeltaToKnowledgeGraph,
@@ -1241,7 +1243,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCurrentProject, reloadGraph, buildingProjects, markProjectBuilding, isProjectBuilding,
     buildProgress, updateBuildProgress, clearBuildProgress, syncBuildStatus,
     repos, setRepos, currentRepo, setCurrentRepo, loading, error, setLoading,
-    graph, setGraph, fileContents, pendingDelta, applyDelta, applyDeltaToKnowledgeGraph,
+    graph, setGraph, fileCacheVersion, pendingDelta, applyDelta, applyDeltaToKnowledgeGraph,
     selectedNode, setSelectedNode,
     fileTreeExpandedPaths, setFileTreeExpandedPaths, fileTreeExpandedPathsReady,
     panelRegistry, openPanels, isPanelOpen, openPanel, closePanel, togglePanel,

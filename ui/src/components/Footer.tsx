@@ -4,7 +4,7 @@ import {
     Shield, Workflow, Terminal, CircleDot, Waypoints, Bell,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useAppState } from '../hooks/useAppState';
+import { useAppStateSelector } from '../hooks/useAppStateSelector';
 import { useNotifications } from '../hooks/useNotifications';
 import type { PanelDef } from '../lib/panelRegistry';
 
@@ -47,7 +47,12 @@ export const Footer = React.memo(function Footer() {
         openPanels,
         togglePanel,
         getPanelsByActivator,
-    } = useAppState();
+    } = useAppStateSelector(s => ({
+        graph: s.graph,
+        openPanels: s.openPanels,
+        togglePanel: s.togglePanel,
+        getPanelsByActivator: s.getPanelsByActivator,
+    }));
 
     // Notification summary: show latest unread notification in footer center
     const { notifications, unreadCount } = useNotifications();

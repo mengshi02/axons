@@ -49,7 +49,7 @@ type wsWriter struct {
 func newWsWriter(conn *websocket.Conn) *wsWriter {
 	w := &wsWriter{
 		conn:    conn,
-		writeCh: make(chan []byte, 256),
+		writeCh: make(chan []byte, 4096),
 		errCh:   make(chan error, 1),
 	}
 	go w.run()
@@ -73,7 +73,8 @@ func (w *wsWriter) run() {
 }
 
 // Write queues a message to be written to the WebSocket.
-// It is non-blocking and safe to call from multiple goroutines.
+// It blocks for up to writeTimeout when the internal buffer is full, applying
+// backpressure to the caller instead of silently dropping data.
 func (w *wsWriter) Write(data []byte) {
 	if w.closed.Load() {
 		return
@@ -86,8 +87,17 @@ func (w *wsWriter) Write(data []byte) {
 	}
 	select {
 	case w.writeCh <- data:
+		return
 	default:
-		// Buffer full, drop message to avoid blocking
+	}
+	// Buffer full — block with timeout instead of dropping.
+	// This propagates backpressure to the terminal output loop.
+	const writeTimeout = 5 * time.Second
+	select {
+	case w.writeCh <- data:
+	case <-time.After(writeTimeout):
+		// Truly stuck — log and drop rather than block forever.
+		zap.L().Warn("wsWriter buffer full after timeout, dropping message")
 	}
 }
 

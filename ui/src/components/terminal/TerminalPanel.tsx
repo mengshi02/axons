@@ -197,6 +197,7 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
   const fitAddonRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
@@ -640,7 +641,7 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
     // 因此 drag 期间改 panel CSS height 不会误触发这里。
     // 用于捕获侧边栏开合等导致终端容器真实宽度变化的场景。
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-    let observedEl: Element | null = null;
+    let observedScreenEl: Element | null = null;
     const resizeObserver = new ResizeObserver(() => {
       if (isDraggingRef.current) return;
       if (resizeTimer) clearTimeout(resizeTimer);
@@ -650,9 +651,9 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
     const startObserving = () => {
       const ai = terminalInstancesRef.current.get(activeTabId || '');
       const screenEl = ai?.xterm?.element?.querySelector('.xterm-screen');
-      if (screenEl && screenEl !== observedEl) {
-        resizeObserver.disconnect();
-        observedEl = screenEl;
+      if (screenEl && screenEl !== observedScreenEl) {
+        if (observedScreenEl) resizeObserver.unobserve(observedScreenEl);
+        observedScreenEl = screenEl;
         resizeObserver.observe(screenEl);
       }
     };
@@ -661,9 +662,34 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
     const pollTimer = setInterval(startObserving, 200);
     startObserving();
 
+    // ResizeObserver 观察终端内容容器的宽度变化。
+    // 当右面板（CodeReferencesPanel）被拖拽变宽/变窄时，
+    // 中间列宽度变化，终端面板容器宽度随之变化，
+    // 但 .xterm-screen 不会因此触发 ResizeObserver（它只在 xterm.resize() 后才变）。
+    // 此观察器检测容器宽度变化，主动触发 xterm 重新计算 cols/rows。
+    let lastObservedWidth = 0;
+    const widthObserver = new ResizeObserver((entries) => {
+      if (isDraggingRef.current) return;
+      for (const entry of entries) {
+        const width = entry.contentBoxSize?.[0]?.inlineSize
+          ?? entry.contentRect.width;
+        // 仅在宽度实际变化时触发，避免高度变化（如终端自身拖拽）误触发
+        if (width !== lastObservedWidth) {
+          lastObservedWidth = width;
+          if (resizeTimer) clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(() => { resizeTimer = null; doResize(); }, 100);
+        }
+      }
+    });
+    if (contentRef.current) {
+      lastObservedWidth = contentRef.current.clientWidth;
+      widthObserver.observe(contentRef.current);
+    }
+
     return () => {
       window.removeEventListener('resize', onWindowResize);
       resizeObserver.disconnect();
+      widthObserver.disconnect();
       clearInterval(pollTimer);
       if (resizeTimer) { clearTimeout(resizeTimer); resizeTimer = null; }
     };
@@ -884,11 +910,13 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
       // 同步设置 CSS height（立即生效）
       panelRef.current.style.height = `${newHeight}px`;
 
-      // ── 同步布局（ SplitView 模式）──
+      // ── 同步布局（SplitView 模式）──
       // CSS height 已改，getTargetDimensions() 内部读 clientHeight
       // 会同步拿到新值，然后立即 xterm.resize()，使
       // Viewport._sync() 在同一 JS task 内用一致的
       // height/scrollHeight 更新 scrollbar，消除抖动。
+      // NOTE: 这里不能用 rAF 延迟——rAF 会让 CSS height 写入和
+      // xterm.resize() 之间出现一帧空隙，导致 scrollbar 闪动。
       const dims = getTargetDimensions();
       if (!dims) return;
       // immediate=false：走 TerminalResizeDebouncer 正常路径
@@ -896,9 +924,13 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
       resizeDebounced(dims.cols, dims.rows, false);
     };
 
-    const handleMouseUp = () => {
+    const finishDrag = () => {
       if (!isDraggingRef.current) return;
       isDraggingRef.current = false;
+      // Ensure the final height is painted
+      if (panelRef.current) {
+        panelRef.current.style.height = `${pendingHeightRef.current}px`;
+      }
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
       document.body.classList.remove('axons-resizing');
@@ -912,11 +944,23 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
       setPanelHeight(pendingHeightRef.current);
     };
 
+    const handleMouseUp = () => finishDrag();
+    // Fallback: abort drag if window loses focus (e.g. Alt+Tab while dragging)
+    const handleBlur = () => finishDrag();
+    // Fallback: abort drag if pointer leaves the document entirely
+    const handleMouseLeave = (e: MouseEvent) => {
+      if (e.relatedTarget === null) finishDrag();
+    };
+
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('blur', handleBlur);
+    document.addEventListener('mouseleave', handleMouseLeave);
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('mouseleave', handleMouseLeave);
       if (debounceXTimer !== null) clearTimeout(debounceXTimer);
       if (resizeXJobId !== null) cancelIdleCallback(resizeXJobId);
       if (resizeYJobId !== null) cancelIdleCallback(resizeYJobId);
@@ -1113,10 +1157,10 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
         // could briefly paint a much thicker dark band on first paint.
       }}
     >
-      {/* A 6px transparent hit area sits at the top of the panel (inside
-          the panel boundary, so it never overlaps the WebGL canvas above
-          and cannot flash black on first paint). On hover, a 2px accent
-          bar fades in to indicate the resize affordance. */}
+      {/* VS Code sash style: 4px transparent hit area, full 4px accent bar on hover.
+          The hit area sits at the top of the panel (inside the panel boundary,
+          so it never overlaps the WebGL canvas above and cannot flash black on
+          first paint). On hover, the entire 4px bar lights up in accent color. */}
       {!isFullscreen && (
         <div
           className="cursor-row-resize group"
@@ -1125,7 +1169,7 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
             left: 0,
             right: 0,
             top: 0,
-            height: '6px',
+            height: '4px',
             zIndex: 50,
             background: 'transparent',
           }}
@@ -1145,17 +1189,10 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
             if (panelRef.current) panelRef.current.style.willChange = 'height';
           }}
         >
-          {/* Hover accent bar — drawn at the very top edge of the panel. */}
+          {/* Hover accent bar — full 4px height, accent color on hover. */}
           <div
-            className="opacity-0 group-hover:opacity-100 transition-opacity bg-accent"
-            style={{
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              top: 0,
-              height: '2px',
-              pointerEvents: 'none',
-            }}
+            className="absolute left-0 right-0 top-0 h-full opacity-0 group-hover:opacity-100 transition-opacity bg-accent"
+            style={{ pointerEvents: 'none' }}
           />
         </div>
       )}
@@ -1234,6 +1271,7 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
 
       {/* Terminal container - one per tab */}
       <div 
+        ref={contentRef}
         className="flex-1 w-full px-2 relative overflow-hidden"
         onContextMenu={handleContextMenu}
       >

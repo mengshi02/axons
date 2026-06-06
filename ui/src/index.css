@@ -18,7 +18,32 @@ body {
 .overflow-auto {
   overscroll-behavior: none;
 }
+  
+/* ═══════════════════════════════════════════════════════════════
+   CSS CONTAIN — layout isolation for major UI sections
+   Prevents browser from recalculating layout outside the
+   containment boundary when internal content changes.
+   ═══════════════════════════════════════════════════════════════ */
 
+/* Activity bar: fixed width sidebar — isolate from main content */
+/* NOTE: omit contain:layout — it creates a stacking context that traps
+   absolutely-positioned popups (ProjectSelector, gear-menu dropdown)
+   behind sibling elements in the parent stacking context. */
+.h-screen>.flex>.shrink-0:first-child,
+.w-11.h-full {
+  contain: style;
+}
+
+/* Footer: fixed height status bar — isolate from main content */
+footer.h-6 {
+  contain: layout style;
+}
+
+/* Top search bar: fixed height — isolate from main content */
+.h-10.shrink-0,
+header[role="banner"] {
+  contain: layout style;
+}
 /* Import plugin-sdk theme.css as Single Source of Truth for CSS variables */
 @import './plugin-sdk/theme.css';
 /* Map dark: variant to .moon-theme class so it follows the app theme toggle */

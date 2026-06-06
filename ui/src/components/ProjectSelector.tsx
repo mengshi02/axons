@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { FolderPlus, Trash2, Play, Loader2, Eye, EyeOff, Layers, CheckCircle, AlertCircle, History, RotateCcw, X } from 'lucide-react';
+import { useAppStateSelector } from '../hooks/useAppStateSelector';
 import { useAppState } from '../hooks/useAppState';
 import { createProject, deleteProject, fetchProjects, fetchGraph, startBuild, fetchTaskStatus, startProjectWatch, stopProjectWatch, fetchProjectWatchStatus, fetchEmbedStatus, triggerEmbed, type Project } from '../services/api';
 import { useEventStream, type EmbedProgressEvent, type EmbedCompleteEvent, type EmbedErrorEvent } from '../hooks/useEventStream';
@@ -75,7 +76,11 @@ interface ProjectSelectorProps {
 
 export function ProjectSelector({ onProjectSelect }: ProjectSelectorProps) {
     const { t } = useTranslation('activitybar');
-    const { projects, loadProjects, currentProject, setCurrentProject, setGraph, markProjectBuilding } = useAppState();
+    const { projects, currentProject } = useAppStateSelector(s => ({
+        projects: s.projects,
+        currentProject: s.currentProject,
+    }));
+    const { loadProjects, setCurrentProject, setGraph, markProjectBuilding } = useAppState();
     const [isImportOpen, setIsImportOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [buildingProjectId, setBuildingProjectId] = useState<string | null>(null);

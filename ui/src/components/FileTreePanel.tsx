@@ -447,6 +447,7 @@ export const FileTreePanel = React.memo(function FileTreePanel({ onSelectNode: _
     setActiveFilePath,
     fileTreeExpandedPaths, setFileTreeExpandedPaths,
     fileTreeExpandedPathsReady,
+    fileCacheVersion,
   } = useAppState();
 
   const [entries, setEntries] = useState<FileTreeEntry[]>([]);
@@ -771,7 +772,7 @@ export const FileTreePanel = React.memo(function FileTreePanel({ onSelectNode: _
         .catch(() => setCodeContent(null))
         .finally(() => setCodeLoading(false));
     }
-  }, [openCodePanel, setActiveFilePath, currentProject?.id, getCachedFile, setCachedFile, setCodeContent, setCodeLoading]);
+  }, [openCodePanel, setActiveFilePath, currentProject?.id, getCachedFile, setCachedFile, setCodeContent, setCodeLoading, fileCacheVersion]);
 
   const handleSelect = useCallback((entry: FileTreeEntry, e: React.MouseEvent) => {
     const isMod = e.metaKey || e.ctrlKey;   // ⌘ on Mac, Ctrl on Windows/Linux
