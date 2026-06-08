@@ -111,10 +111,16 @@ func runForkedDaemon(cfg *config.Config) error {
 		d.SetTCPAddr(daemonTCP)
 	}
 
+	// Detect desktop mode from environment variable (set by Electron main process)
+	if os.Getenv("AXONS_DESKTOP_MODE") == "1" {
+		d.SetDesktopMode(true)
+	}
+
 	logger.Info("Daemon starting",
 		zap.String("socket", cfg.SocketPath()),
 		zap.String("tcp", daemonTCP),
 		zap.Bool("debug", daemonDebug),
+		zap.Bool("desktop", d.IsDesktopMode()),
 	)
 
 	if err := d.Run(); err != nil {

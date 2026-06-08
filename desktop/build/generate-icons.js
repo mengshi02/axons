@@ -16,7 +16,7 @@ async function generateIcons() {
 
     const svg = fs.readFileSync(svgPath);
 
-    // Generate main icon 1024x1024 (for macOS, Wails will convert to .icns)
+    // Generate main icon 1024x1024 (for macOS, electron-builder will convert to .icns)
     const mainIcon = path.join(buildDir, 'appicon.png');
     await sharp(svg).resize(1024, 1024).png().toFile(mainIcon);
     console.log('✅ Created:', mainIcon);

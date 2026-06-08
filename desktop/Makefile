@@ -1,104 +1,108 @@
 # Axons Desktop Application Makefile
-# Build and development commands for the desktop app (Wails v3)
+# Build and development commands for Electron desktop app
 
-# Binary name
-BINARY_NAME=axons
+# ── Variables ────────────────────────────────────────────────────────────────
 
-# Version
-VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+BINARY_NAME := axons-daemon
+ROOT_DIR    := ..
+DAEMON_BIN  := bin/$(BINARY_NAME)
 
-# Wails v3 command
-WAILS?=$(shell which wails3 2>/dev/null || echo "$(HOME)/go/bin/wails3")
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-.PHONY: all dev build build-mac build-mac-arm64 build-mac-amd64 build-mac-dmg build-mac-intel-dmg build-linux build-linux-appimage build-windows build-windows-installer clean help
+LDFLAGS := -ldflags "\
+	-X github.com/mengshi02/axons/internal/version.Version=$(VERSION) \
+	-X github.com/mengshi02/axons/internal/version.Commit=$(COMMIT) \
+	-X github.com/mengshi02/axons/internal/version.Date=$(DATE) \
+	-s -w"
 
-# Default target
+# ── PHONY ────────────────────────────────────────────────────────────────────
+
+.PHONY: all dev build build-daemon build-electron \
+        dist dist-mac dist-win dist-linux \
+        install clean help
+
+# ── Default ──────────────────────────────────────────────────────────────────
+
 all: build
 
-## dev: Run in development mode with hot reload
-dev:
-	@echo "Starting development mode..."
-	$(WAILS) dev
+# ══════════════════════════════════════════════════════════════════════════════
+#  Development
+# ══════════════════════════════════════════════════════════════════════════════
 
-## build: Build for current platform
-build:
-	@echo "Building desktop app for current platform..."
-	$(WAILS) build
-	@echo "Build complete."
+## dev: Run in development mode (build daemon + start Electron)
+dev: build-daemon
+	@echo "Starting Electron in development mode..."
+	npm run dev
 
-## build-mac: Build for macOS (current architecture)
-build-mac:
-	@echo "Building for macOS..."
-	$(WAILS) build
-	@echo "Build complete."
+# ══════════════════════════════════════════════════════════════════════════════
+#  Build
+# ══════════════════════════════════════════════════════════════════════════════
 
-## build-mac-arm64: Build for macOS ARM64 (Apple Silicon)
-build-mac-arm64:
-	@echo "Building for macOS ARM64..."
-	GOARCH=arm64 $(WAILS) build
-	@echo "Build complete."
+## build: Build daemon + compile Electron main process
+build: build-daemon build-electron
 
-## build-mac-amd64: Build for macOS AMD64 (Intel)
-build-mac-amd64:
-	@echo "Building for macOS AMD64..."
-	GOARCH=amd64 $(WAILS) build
-	@echo "Build complete."
+## build-daemon: Build the Go daemon binary for current platform
+build-daemon:
+	@echo "Building Go daemon..."
+	@mkdir -p bin
+	cd $(ROOT_DIR) && go build $(LDFLAGS) -o desktop/$(DAEMON_BIN) ./cmd/axons/
+	@echo "Daemon built: $(DAEMON_BIN)"
 
-## build-mac-dmg: Build macOS DMG installer (current architecture)
-build-mac-dmg:
-	@echo "Packaging macOS app and creating DMG..."
-	$(WAILS) task package
-	./build/create-dmg.sh
+## build-electron: Compile TypeScript Electron main process
+build-electron:
+	@echo "Compiling Electron main process..."
+	npm run build
+	@echo "Electron build complete."
 
-## build-mac-intel-dmg: Build macOS DMG installer for Intel (AMD64)
-build-mac-intel-dmg:
-	@echo "Packaging macOS Intel app and creating DMG..."
-	ARCH=amd64 $(WAILS) task darwin:package
-	ARCH_SUFFIX=intel ./build/create-dmg.sh
+# ══════════════════════════════════════════════════════════════════════════════
+#  Distribution (electron-builder)
+# ══════════════════════════════════════════════════════════════════════════════
 
-## build-windows: Build for Windows
-build-windows:
-	@echo "Building for Windows..."
-	GOOS=windows $(WAILS) task windows:build
-	@echo "Build complete."
+## dist: Package for current platform
+dist: build
+	npm run dist
 
-## build-windows-signed: Build for Windows with code signing
-build-windows-signed:
-	@echo "Building and signing for Windows..."
-	GOOS=windows $(WAILS) task windows:sign
-	@echo "Build and signing complete."
+## dist-mac: Package for macOS (DMG + ZIP)
+dist-mac: build
+	npm run dist:mac
 
-## build-windows-installer: Build Windows installer with NSIS
-build-windows-installer:
-	@echo "Building Windows installer..."
-	SIGN_CERT="$(SIGN_CERT)" SIGN_KEY="$(SIGN_KEY)" $(WAILS) task windows:package
-	@echo "Build complete."
+## dist-win: Package for Windows (NSIS installer)
+dist-win:
+	@echo "Building daemon for Windows..."
+	@mkdir -p bin
+	cd $(ROOT_DIR) && GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o desktop/bin/$(BINARY_NAME).exe ./cmd/axons/
+	npm run build
+	npm run dist:win
 
-## build-linux: Build for Linux
-build-linux:
-	@echo "Building for Linux..."
-	$(WAILS) task linux:build
-	@echo "Build complete."
+## dist-linux: Package for Linux (AppImage + deb)
+dist-linux:
+	@echo "Building daemon for Linux..."
+	@mkdir -p bin
+	cd $(ROOT_DIR) && GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o desktop/bin/$(BINARY_NAME) ./cmd/axons/
+	npm run build
+	npm run dist:linux
 
-## build-linux-appimage: Build Linux AppImage package
-build-linux-appimage:
-	@echo "Building Linux AppImage..."
-	$(WAILS) task linux:package
-	@echo "Build complete."
+# ══════════════════════════════════════════════════════════════════════════════
+#  Dependencies & Cleanup
+# ══════════════════════════════════════════════════════════════════════════════
+
+## install: Install npm dependencies
+install:
+	npm install
 
 ## clean: Clean build artifacts
 clean:
-	@echo "Cleaning build artifacts..."
-	rm -rf bin/
-	@echo "Cleaned."
+	rm -rf bin/ dist/ release/
 
-## doctor: Check Wails dependencies
-doctor:
-	$(WAILS) doctor
+# ══════════════════════════════════════════════════════════════════════════════
+#  Misc
+# ══════════════════════════════════════════════════════════════════════════════
 
 ## help: Show this help message
 help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
-	@sed -n 's/^## //p' $(MAKEFILE_LIST) | column -t -s ':'
+	@sed -n 's/^## //p' Makefile | column -t -s ':'

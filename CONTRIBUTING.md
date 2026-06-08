@@ -182,7 +182,7 @@ axons/
 ├── ui/                 # Frontend application (React 19 + Sigma.js + xterm.js)
 │   ├── src/            # Source code
 │   └── public/         # Static assets
-├── desktop/            # Desktop application (Wails v3)
+├── desktop/            # Desktop application (Electron)
 ├── docs/               # Documentation
 ├── Makefile            # Build automation
 └── go.mod              # Go module definition

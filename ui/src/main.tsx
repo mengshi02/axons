@@ -3,7 +3,6 @@ import { AppProvider } from './hooks/useAppState';
 import { ThemeProvider } from './hooks/useTheme';
 import App from './App';
 import { initConfig } from './lib/config';
-import { initWailsDrag } from './lib/wails-drag';
 import './i18n'; // Initialize i18next (must be imported before React renders)
 import './index.css';
 import './plugin-sdk/theme.css';
@@ -25,17 +24,11 @@ document.head.appendChild(pluginSdkScript);
 // Note: StrictMode is disabled to prevent double-rendering issues with Sigma.js
 // Sigma.js manipulates DOM directly and conflicts with React's StrictMode behavior
 
-// Initialize Wails drag support for desktop mode.
-// This must be called before React renders, so the mousedown/mousemove listeners
-// are in place before any user interaction.
-initWailsDrag();
-
 // Initialize runtime config BEFORE rendering the React app.
-// In desktop (Wails) mode, this fetches the daemon's localhost address so that
+// In desktop mode, this fetches the daemon's localhost address so that
 // API requests go to the Go daemon. Without this await, React renders and fires
 // API calls before baseURL is configured, causing all /v1/ and /api/ requests to
-// hit the Wails AssetServer (static files) instead of the daemon, which returns
-// 404/HTML — resulting in an empty project list and the DropZone being shown.
+// fail — resulting in an empty project list and the DropZone being shown.
 initConfig().then(() => {
   // Fetch locale→plugin mapping for i18next http-backend.
   // This must happen before React renders so that changeLanguage()

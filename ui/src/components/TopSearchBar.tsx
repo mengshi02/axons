@@ -202,13 +202,13 @@ export const TopSearchBar = React.memo(function TopSearchBar({ onFocusNode, noti
     return (
         <div
             className="flex items-center px-3 py-0.5 bg-deep border-b border-border-subtle"
-            style={{ '--wails-draggable': 'drag' } as React.CSSProperties}
+            style={{ '--desktop-draggable': 'drag' } as React.CSSProperties}
         >
             {/* Spacer for macOS traffic lights + centering */}
             <div className="flex-1" />
 
             {/* Search - centered */}
-            <div className="flex-1 max-w-lg relative" ref={searchRef} style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}>
+            <div className="flex-1 max-w-lg relative" ref={searchRef} style={{ '--desktop-draggable': 'no-drag' } as React.CSSProperties}>
                 <div className="flex items-center gap-1.5 px-2 py-0.5 bg-surface border border-border-subtle rounded-md transition-all focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20">
                     {isFulltextSearching
                         ? <Loader2 className="w-4 h-4 text-text-muted flex-shrink-0 animate-spin" />
@@ -342,7 +342,7 @@ export const TopSearchBar = React.memo(function TopSearchBar({ onFocusNode, noti
 
             {/* Right spacer for centering */}
             <div className="flex-1 relative">
-                <div style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}>
+                <div style={{ '--desktop-draggable': 'no-drag' } as React.CSSProperties}>
                     <NotificationBell
                         unreadCount={unreadCount}
                         onClick={onTogglePanel}

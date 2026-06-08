@@ -629,7 +629,7 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
       } catch { /* ignore */ }
     };
 
-    // window.resize：Wails 应用窗口大小变化（drag 期间跳过）
+    // window.resize：桌面应用窗口大小变化（drag 期间跳过）
     const onWindowResize = () => {
       if (isDraggingRef.current) return;
       doResize();
@@ -1157,7 +1157,7 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
         // could briefly paint a much thicker dark band on first paint.
       }}
     >
-      {/* VS Code sash style: 4px transparent hit area, full 4px accent bar on hover.
+      {/* IDE sash style: 4px transparent hit area, full 4px accent bar on hover.
           The hit area sits at the top of the panel (inside the panel boundary,
           so it never overlaps the WebGL canvas above and cannot flash black on
           first paint). On hover, the entire 4px bar lights up in accent color. */}

@@ -57,7 +57,7 @@
 
 ### 2.1 前提：桌面端加载模式
 
-参见 [`desktop/main.go`](../desktop/main.go) 顶部注释 — Wails v3 桌面端的 webview 直接加载 daemon 的 `http://127.0.0.1:<random-port>`，**三端均为同源 HTTP**，不存在 `file://` 或自定义 `wails://` 协议。这意味着 iframe + sandbox + postMessage 的兼容性等同于浏览器在标准 HTTP 同源下的行为，不会触发各 WebView 在 `file://` 下的历史兼容问题。
+参见 [`desktop/main.go`](../desktop/main.go) 顶部注释 — Electron 桌面端的 webview 直接加载 daemon 的 `http://127.0.0.1:<random-port>`，**三端均为同源 HTTP**，不存在 `file://` 或自定义协议。这意味着 iframe + sandbox + postMessage 的兼容性等同于浏览器在标准 HTTP 同源下的行为，不会触发各 WebView 在 `file://` 下的历史兼容问题。
 
 ### 2.2 各端 WebView 兼容性矩阵
 
@@ -842,7 +842,7 @@ router.GET("/v1/plugins/events/stream", globalBus.HandleEventStream)
 
 #### 6.7.4 桌面端说明
 
-参见 [`desktop/main.go`](../desktop/main.go) 的架构注释，Wails v3 桌面端的 webview 加载 daemon 的 `http://127.0.0.1:<random-port>`，主 UI 与 iframe-host 由同一个 daemon HTTP 服务器提供：
+参见 [`desktop/main.go`](../desktop/main.go) 的架构注释，Electron 桌面端的 webview 加载 daemon 的 `http://127.0.0.1:<random-port>`，主 UI 与 iframe-host 由同一个 daemon HTTP 服务器提供：
 
 - `frame-ancestors 'self'` 在三个桌面端均生效
 - 桌面端 `fetch`/`EventSource` 直连插件后端端口，CSP `connect-src` 动态放行 `http://127.0.0.1:*`；Web 端统一走代理，`connect-src 'self'` 即可
@@ -1000,7 +1000,7 @@ onEvent('node:selected'):
 
 1. 在 `App.tsx` 中临时插入一个 `<iframe src="/v1/plugins/test/iframe-host">`
 2. daemon 返回最简 iframe-host HTML（含 `<script>` 和 `postMessage` 通信）
-3. 在 Wails v3 桌面端运行，验证：
+3. 在 Electron 桌面端运行，验证：
    - iframe 是否正常渲染
    - postMessage 双向通信、origin 校验是否正常
    - sandbox 属性是否生效

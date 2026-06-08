@@ -126,7 +126,7 @@ During implementation, we follow the **thin frontend, thick backend** principle:
 
 #### Problem
 
-Axons supports both desktop (Wails WebView) and Web (browser), and the plugin frontend accessing the plugin backend has cross-origin issues:
+Axons supports both desktop (Electron) and Web (browser), and the plugin frontend accessing the plugin backend has cross-origin issues:
 
 | Scenario | Frontend origin | Plugin backend origin | Cross-origin? | Reason |
 |------|------------|----------------|-------|------|
@@ -140,7 +140,7 @@ Axons supports both desktop (Wails WebView) and Web (browser), and the plugin fr
 **Web: Frontend accesses plugin backend via axons reverse proxy (same origin, no CORS, solves remote reachability)**
 
 ```
-Desktop (Wails WebView):
+Desktop (Electron):
   Frontend ──direct──→ Plugin backend http://127.0.0.1:{pluginPort}/api/*
          ──direct──→ axons API   http://127.0.0.1:{axonsPort}/v1/*
          (Plugin backend adds CORS headers, frontend same-machine direct, zero latency)
@@ -153,7 +153,7 @@ Web (Browser):
 
 #### Runtime Environment Detection
 
-Wails v3 injects the `window._wails` object after WebView loads, but injection has a delay. Detection logic:
+Electron injects the `window.electronAPI` object via preload script's contextBridge, available immediately after page load. Detection logic:
 
 ```typescript
 // lib/config.ts — extended
@@ -166,17 +166,17 @@ export function getRuntimeMode(): 'desktop' | 'web' {
 export async function initConfig(): Promise<void> {
   const isLocalhost = window.location.hostname === '127.0.0.1'
                     || window.location.hostname === 'localhost';
-  const hasWails = !!(window as any)._wails;
+  const hasElectron = !!window.electronAPI?.isElectron;
 
-  // Wails injection may be delayed, localhost + brief wait then retry
-  if (isLocalhost && !hasWails) {
+  // Electron's preload runs before page load, no delay retry needed
+  if (isLocalhost && !hasElectron) {
     await new Promise(r => setTimeout(r, 100));
   }
-  runtimeMode = isLocalhost && !!(window as any)._wails ? 'desktop' : 'web';
+  runtimeMode = isLocalhost && hasElectron ? 'desktop' : 'web';
 }
 ```
 
-Detection logic: Desktop WebView always loads from `127.0.0.1` (`isLocalhost` is reliable), `_wails` precisely confirms.
+Detection logic: Desktop WebView always loads from `127.0.0.1` (`isLocalhost` is reliable), `electronAPI` precisely confirms.
 
 #### pluginApi URL Branching
 
@@ -1880,7 +1880,7 @@ Error handling principles:
 - ErrorBoundary catches render-time errors, import catch catches load-time errors
 ```
 
-> Wails special handling: Plugin UI files are placed under `~/.axons/plugins/:id/ui/`, axons's static handler adds `/plugins/*` route pointing to that directory.
+> Desktop special handling: Plugin UI files are placed under `~/.axons/plugins/:id/ui/`, axons's static handler adds `/plugins/*` route pointing to that directory.
 
 ### 5.6 Unified Hook
 
@@ -2686,7 +2686,7 @@ curl http://127.0.0.1:18080/api/models
 
 **Method 1: Browser DevTools**
 
-axons is based on Wails (WebView), you can open DevTools:
+axons is based on Electron, you can open DevTools:
 
 1. Desktop app: `Cmd+Option+I` (macOS) / `F12` (Windows/Linux)
 2. Check plugin loading logs in Console

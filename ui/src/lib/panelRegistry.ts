@@ -46,6 +46,8 @@ export interface PanelDef {
   action?: PanelAction;
   /** 是否为插件面板 */
   isPlugin?: boolean;
+  /** 是否为独立窗口面板（不在主窗口内渲染） */
+  standalone?: boolean;
   /** 插件 ID（仅插件面板有值） */
   pluginId?: string;
   /** 插件后端 endpoint（仅插件面板有值，如 http://127.0.0.1:18080） */

@@ -195,7 +195,7 @@ export function IframePluginPanel({ def, onClose }: IframePluginPanelProps) {
   return (
     <div className={containerClass} style={containerStyle}>
       {/* Resize handle — only rendered for self-managed (right-docked) panels.
-          VS Code sash style: 4px hit area, transparent by default, full accent on hover.
+          IDE sash style: 4px hit area, transparent by default, full accent on hover.
           For left/left-top panels, the parent column owns the resize handle. */}
       {selfManagesWidth && (
         <div

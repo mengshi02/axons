@@ -1,6 +1,6 @@
 // API base URL configuration.
 //
-// In desktop mode (Wails v3), the webview loads the daemon's URL directly
+// In desktop mode (Electron), the BrowserWindow loads the daemon's URL directly
 // (http://127.0.0.1:PORT), so all requests are same-origin — no baseURL needed.
 // In web mode, baseURL also stays empty (same-origin by default).
 
@@ -28,16 +28,14 @@ export function getRuntimeMode(): 'desktop' | 'web' {
 }
 
 export async function initConfig(): Promise<void> {
-    // Detect runtime mode: desktop (Wails WebView) vs web (browser)
+    // Detect runtime mode: desktop (Electron) vs web (browser)
     const isLocalhost = window.location.hostname === '127.0.0.1'
         || window.location.hostname === 'localhost';
-    const hasWails = !!(window as any)._wails;
 
-    // Wails v3 injects window._wails after WebView loads, but there may be a delay.
-    // If we're on localhost and _wails isn't set yet, wait briefly and retry.
-    if (isLocalhost && !hasWails) {
-        await new Promise(r => setTimeout(r, 100));
-    }
+    // Electron injects window.electronAPI via preload script's contextBridge.
+    // The preload runs before the page loads, so window.electronAPI is
+    // available immediately — no retry needed.
+    const hasElectron = !!window.electronAPI?.isElectron;
 
-    runtimeMode = isLocalhost && !!(window as any)._wails ? 'desktop' : 'web';
+    runtimeMode = isLocalhost && hasElectron ? 'desktop' : 'web';
 }

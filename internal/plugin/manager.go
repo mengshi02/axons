@@ -137,7 +137,7 @@ func (m *Manager) SetAxonsPort(port int) {
 }
 
 // SetRuntimeMode sets the runtime mode ("desktop" or "web").
-// Called by daemon at startup — desktop mode via Wails, web mode otherwise.
+// Called by daemon at startup — desktop mode via Electron, web mode otherwise.
 func (m *Manager) SetRuntimeMode(mode string) {
 	m.runtimeMode = mode
 }

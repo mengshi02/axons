@@ -43,6 +43,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
 
+  // Listen for theme changes from other tabs/windows (same-origin sync via localStorage)
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === THEME_KEY && (e.newValue === 'moon' || e.newValue === 'sun')) {
+        console.log('[ThemeProvider] storage event, new theme:', e.newValue);
+        setThemeState(e.newValue as Theme);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
   const setTheme = (newTheme: Theme) => {
     setThemeState(newTheme);
   };

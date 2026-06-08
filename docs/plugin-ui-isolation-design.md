@@ -57,7 +57,7 @@ This design follows the **thin frontend, thick backend** principle — the front
 
 ### 2.1 Prerequisite: Desktop Loading Mode
 
-See the top comment in [`desktop/main.go`](../desktop/main.go) — Wails v3 desktop webview directly loads the daemon's `http://127.0.0.1:<random-port>`, so **all three desktop platforms use same-origin HTTP**. There is no `file://` or custom `wails://` protocol. This means the compatibility of iframe + sandbox + postMessage is equivalent to browser behavior under standard same-origin HTTP, and will not trigger historical compatibility issues of various WebViews under `file://`.
+See the top comment in [`desktop/main.go`](../desktop/main.go) — Electron desktop webview directly loads the daemon's `http://127.0.0.1:<random-port>`, so **all three desktop platforms use same-origin HTTP**. There is no `file://` or custom protocol. This means the compatibility of iframe + sandbox + postMessage is equivalent to browser behavior under standard same-origin HTTP, and will not trigger historical compatibility issues of various WebViews under `file://`.
 
 ### 2.2 Platform WebView Compatibility Matrix
 
@@ -842,7 +842,7 @@ router.GET("/v1/plugins/events/stream", globalBus.HandleEventStream)
 
 #### 6.7.4 Desktop Notes
 
-See the architecture comment in [`desktop/main.go`](../desktop/main.go). Wails v3 desktop webview loads the daemon's `http://127.0.0.1:<random-port>`. The main UI and iframe-host are served by the same daemon HTTP server:
+See the architecture comment in [`desktop/main.go`](../desktop/main.go). Electron desktop webview loads the daemon's `http://127.0.0.1:<random-port>`. The main UI and iframe-host are served by the same daemon HTTP server:
 
 - `frame-ancestors 'self'` works on all three desktop platforms
 - Desktop `fetch`/`EventSource` directly connects to the plugin backend port; CSP `connect-src` dynamically allows `http://127.0.0.1:*`; Web uniformly uses proxy, `connect-src 'self'` suffices
@@ -1000,7 +1000,7 @@ Before the full refactoring, spend 1 day on a minimal three-platform PoC verific
 
 1. Temporarily insert an `<iframe src="/v1/plugins/test/iframe-host">` in `App.tsx`
 2. daemon returns a minimal iframe-host HTML (containing `<script>` and `postMessage` communication)
-3. Run on Wails v3 desktop, verifying:
+3. Run on Electron desktop, verifying:
    - Whether the iframe renders correctly
    - Whether bidirectional postMessage communication and origin verification work properly
    - Whether the sandbox attribute is enforced

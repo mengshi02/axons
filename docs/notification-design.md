@@ -1147,7 +1147,7 @@ Insert the bell into the right spacer area of [`TopSearchBar.tsx`](../ui/src/com
 {/* <div className="flex-1" /> */}
 
 {/* Modified: bell + spacer */}
-<div style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}>
+<div style={{ '--desktop-draggable': 'no-drag' } as React.CSSProperties}>
   <NotificationBell
     unreadCount={unreadCount}
     onClick={() => setPanelOpen(prev => !prev)}
@@ -1308,18 +1308,18 @@ Click bell → NotificationPanel expands
 
 ## 10. Desktop & Web Compatibility
 
-Axons runs on both desktop (Wails webview) and web (browser), and the notification system must work correctly in both environments.
+Axons runs on both desktop (Electron) and web (browser), and the notification system must work correctly in both environments.
 
 ### 10.1 Comparison of Two Runtime Modes
 
-| Dimension | Desktop (Wails) | Web (Browser) |
+| Dimension | Desktop (Electron) | Web (Browser) |
 |-----------|----------------|---------------|
 | Frontend loading | webview loads `http://127.0.0.1:PORT` | Browser accesses remote daemon URL |
 | API requests | same-origin, no CORS issues | same-origin, no CORS issues |
 | SSE connection | `http://127.0.0.1:PORT/v1/events` | `http://<daemon-host>/v1/events` |
 | Plugin backend→daemon | localhost HTTP, no CORS | localhost HTTP (same-machine), no CORS |
 | Users | Single user | Potentially multiple users (remote deployment) |
-| Tabs | Single window (Wails webview) | Possibly multiple tabs |
+| Tabs | Single window (Electron) | Possibly multiple tabs |
 
 ### 10.2 Compatibility Analysis
 
@@ -1333,7 +1333,7 @@ Axons runs on both desktop (Wails webview) and web (browser), and the notificati
 
 | Difference | Description | Handling method |
 |------------|-------------|----------------|
-| **Desktop native notifications** | Desktop can send OS-level notifications via Wails API or `Notification` Web API, allowing users to perceive them without focusing the window | Phase 2: Detect `getRuntimeMode() === 'desktop'` + `Notification.permission` to send native notifications |
+| **Desktop native notifications** | Desktop can send OS-level notifications via Electron API or `Notification` Web API, allowing users to perceive them without focusing the window | Phase 2: Detect `getRuntimeMode() === 'desktop'` + `Notification.permission` to send native notifications |
 | **Web multi-tab** | Web users may open multiple tabs, each independently receiving SSE events, operating on the same notification data | Backend is stateless, SQLite writes are naturally serialized; frontend tabs each maintain local state, and operations on APIs sync via SSE without additional handling |
 | **Web offline scenario** | When web network disconnects, SSE drops, and notifications can't be pushed in real time | Already handled by SSE reconnection + `refresh()` mechanism (§4.3), auto-reconciles after reconnection |
 | **Web multi-user** | In remote deployment scenarios, multiple users access the same daemon with non-isolated notification data | Not handled in phase 1 (single-user scenario). Phase 3 can consider per-user notification isolation (requires introducing a user identity system) |

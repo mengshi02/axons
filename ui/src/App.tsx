@@ -535,7 +535,7 @@ function App() {
             style={{ width: leftPanelWidth, contain: 'layout style' }}
           className="h-full shrink-0 bg-surface border-r border-border-subtle flex flex-col overflow-hidden relative"
         >
-            {/* Resize handle on right side — VS Code sash style: 4px hit area, transparent by default, full accent on hover */}
+            {/* Resize handle on right side — IDE sash style: 4px hit area, transparent by default, full accent on hover */}
           <div
               className="absolute right-0 top-0 bottom-0 cursor-col-resize z-20 group"
               style={{ width: '4px' }}
@@ -615,8 +615,8 @@ function App() {
             )}
           </div>
 
-          {/* Center-bottom panels (Terminal) — absolute positioned to overlay graph, not push it */}
-          {centerBottomPanels.filter(p => openPanels.has(p.id)).map(p => renderPanel(p.id))}
+          {/* Center-bottom panels */}
+          {centerBottomPanels.filter(p => openPanels.has(p.id) && !p.standalone).map(p => renderPanel(p.id))}
         </div>
 
         {/* Right panels (Code references) */}

@@ -3,7 +3,7 @@ import type { ReactElement, AnchorHTMLAttributes } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getRuntimeMode } from '../../lib/config';
-import { openExternal } from '../../lib/wails-bridge';
+import { openExternal } from '../../lib/electron-bridge';
 
 /**
  * LRU cache for rendered ReactMarkdown trees.

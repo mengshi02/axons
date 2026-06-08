@@ -1,5 +1,5 @@
 #!/bin/bash
-# Convert SVG icon to PNG for Wails desktop app
+# Convert SVG icon to PNG for desktop app
 # Requires sharp (npm install sharp --save-dev in web/)
 
 set -e
@@ -20,7 +20,7 @@ const buildDir = '../desktop/build';
 const windowsDir = buildDir + '/windows';
 
 (async () => {
-  // Main icon for macOS (Wails will convert to .icns)
+  // Main icon for macOS (electron-builder will convert to .icns)
   await sharp(svg).resize(1024, 1024).png().toFile(buildDir + '/appicon.png');
   console.log('Created appicon.png');
   
@@ -34,4 +34,4 @@ const windowsDir = buildDir + '/windows';
 })();
 "
 
-echo "✅ Icons ready for Wails build!"
+echo "✅ Icons ready for desktop build!"

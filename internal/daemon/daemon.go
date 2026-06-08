@@ -42,7 +42,7 @@ type Daemon struct {
 	tcpAddr     string
 	mu          sync.RWMutex
 	running     bool
-	desktopMode bool // true when running inside the Wails desktop app
+	desktopMode bool // true when running inside the desktop app
 }
 
 // New creates a new Daemon instance.
@@ -77,7 +77,7 @@ func (d *Daemon) SetTCPListener(listener net.Listener) {
 	d.tcpAddr = listener.Addr().String()
 }
 
-// SetDesktopMode marks the daemon as running inside the Wails desktop app.
+// SetDesktopMode marks the daemon as running inside the desktop app (Electron).
 func (d *Daemon) SetDesktopMode(desktop bool) {
 	d.desktopMode = desktop
 	// Propagate to plugin manager for CSP/runtime decisions
@@ -92,7 +92,7 @@ func (d *Daemon) SetDesktopMode(desktop bool) {
 	}
 }
 
-// IsDesktopMode returns true when running inside the Wails desktop app.
+// IsDesktopMode returns true when running inside the desktop app (Electron).
 func (d *Daemon) IsDesktopMode() bool {
 	return d.desktopMode
 }

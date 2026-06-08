@@ -1557,7 +1557,7 @@ export const FileTreePanel = React.memo(function FileTreePanel({ onSelectNode: _
       {/* Tree */}
       <div
         className="flex-1 overflow-y-auto py-1 scrollbar-thin"
-        style={{ contain: 'content', '--wails-draggable': 'no-drag' } as React.CSSProperties}
+        style={{ contain: 'content', '--desktop-draggable': 'no-drag' } as React.CSSProperties}
         onClick={(e) => {
           // Only clear selection when clicking the blank area of the tree container,
           // not when clicking on a tree node (which has its own onClick handler).

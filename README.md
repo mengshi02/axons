@@ -212,7 +212,7 @@ make daemon        # Start backend in another terminal
 
 ### Desktop App
 
-The project provides a desktop client built with Wails:
+The project provides a desktop client built with Electron:
 
 ```bash
 make desktop-dev           # Development mode

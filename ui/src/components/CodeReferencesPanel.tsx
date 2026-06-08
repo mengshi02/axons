@@ -559,7 +559,7 @@ export const CodeReferencesPanel = React.memo(function CodeReferencesPanel({ onC
         className="h-full shrink-0 bg-surface border-l border-border-subtle flex flex-col overflow-hidden relative"
         style={{ width: panelWidth, contain: 'layout style' }}
       >
-        {/* Resize handle — VS Code sash style: 4px hit area, transparent by default, full accent on hover */}
+        {/* Resize handle — IDE sash style: 4px hit area, transparent by default, full accent on hover */}
         <div
           className="absolute left-0 top-0 bottom-0 cursor-col-resize z-10 group"
           style={{ width: '4px' }}
@@ -591,7 +591,7 @@ export const CodeReferencesPanel = React.memo(function CodeReferencesPanel({ onC
       className="h-full shrink-0 bg-surface border-l border-border-subtle flex flex-col overflow-hidden relative"
       style={{ width: panelWidth, contain: 'layout style' }}
     >
-      {/* Resize handle — VS Code sash style: 4px hit area, transparent by default, full accent on hover */}
+      {/* Resize handle — IDE sash style: 4px hit area, transparent by default, full accent on hover */}
       <div
         className="absolute left-0 top-0 bottom-0 cursor-col-resize z-10 group"
         style={{ width: '4px' }}

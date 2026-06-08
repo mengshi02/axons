@@ -114,7 +114,7 @@ export function NotificationPanel({
     <div
       ref={panelRef}
       className="absolute top-full right-0 mt-1 w-80 bg-surface border border-border-subtle rounded-lg shadow-xl overflow-hidden z-50"
-      style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}
+      style={{ '--desktop-draggable': 'no-drag' } as React.CSSProperties}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-subtle bg-elevated">
