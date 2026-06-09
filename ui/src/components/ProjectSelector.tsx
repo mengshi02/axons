@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { FolderPlus, Trash2, Play, Loader2, Eye, EyeOff, Layers, CheckCircle, AlertCircle, History, RotateCcw, X } from 'lucide-react';
 import { useAppStateSelector } from '../hooks/useAppStateSelector';
 import { useAppState } from '../hooks/useAppState';
-import { createProject, deleteProject, fetchProjects, fetchGraph, startBuild, fetchTaskStatus, startProjectWatch, stopProjectWatch, fetchProjectWatchStatus, fetchEmbedStatus, triggerEmbed, type Project } from '../services/api';
-import { useEventStream, type EmbedProgressEvent, type EmbedCompleteEvent, type EmbedErrorEvent } from '../hooks/useEventStream';
+import { useProjectActions, type EmbedActionState } from '../hooks/useProjectActions';
+import { createProject, startProjectWatch, type Project } from '../services/api';
 import { UnifiedImportDialog } from './UnifiedImportDialog';
 import { useTranslation } from 'react-i18next';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -43,26 +43,6 @@ function LanguageBadge({ language }: { language: string }) {
     );
 }
 
-interface EmbedStatusEntry {
-    configured: boolean;
-    embedding_count: number;
-    code_embedding_count: number;
-    needs_reembedding: boolean;
-}
-
-// Embed action status for visual feedback
-type EmbedActionStatus = 'idle' | 'running' | 'success' | 'error';
-
-interface EmbedActionState {
-    status: EmbedActionStatus;
-    progress?: { current: number; total: number };
-    message?: string;
-    totalNodes?: number;
-    newEmbeddings?: number;
-    updatedEmbeddings?: number;
-    error?: string;
-}
-
 // Extract project name from path (last directory name)
 function extractProjectName(path: string): string {
     const normalized = path.replace(/\\/g, '/');
@@ -81,282 +61,73 @@ export function ProjectSelector({ onProjectSelect }: ProjectSelectorProps) {
         currentProject: s.currentProject,
     }));
     const { loadProjects, setCurrentProject, setGraph, markProjectBuilding } = useAppState();
+    const {
+        buildingProjectId,
+        watchStatus,
+        embedStatus,
+        embedActionStates,
+        startBuild,
+        toggleWatch,
+        triggerProjectEmbed,
+        deleteProjectAction,
+    } = useProjectActions();
+
     const [isImportOpen, setIsImportOpen] = useState(false);
     const [loading, setLoading] = useState(false);
-    const [buildingProjectId, setBuildingProjectId] = useState<string | null>(null);
-    const [watchStatus, setWatchStatus] = useState<Record<string, { is_running: boolean; watch_enabled: boolean }>>({});
-    const [embedStatus, setEmbedStatus] = useState<Record<string, EmbedStatusEntry>>({});
-    const [embedActionStates, setEmbedActionStates] = useState<Record<string, EmbedActionState>>({});
-    const { recentPaths, addRecentPath, removeRecentPath } = useRecentPaths();
     const [deleteProjectInfo, setDeleteProjectInfo] = useState<Project | null>(null);
+    const { recentPaths, addRecentPath, removeRecentPath } = useRecentPaths();
 
-    const loadEmbedStatusForProject = useCallback(async (projectId: string) => {
-        try {
-            const status = await fetchEmbedStatus(projectId);
-            setEmbedStatus(prev => ({
-                ...prev,
-                [projectId]: {
-                    configured: status.is_configured,
-                    embedding_count: status.embedding_count,
-                    code_embedding_count: status.code_embedding_count,
-                    needs_reembedding: status.needs_reembedding,
-                },
-            }));
-        } catch {
-            // ignore
-        }
-    }, []);
-
-    // SSE event handlers for embedding status
-    const handleEmbedProgress = useCallback((data: EmbedProgressEvent) => {
-        setEmbedActionStates(prev => ({
-            ...prev,
-            [data.project_id]: {
-                status: 'running',
-                progress: { current: data.current, total: data.total },
-                message: t('projects.embeddingProgress', { current: data.current, total: data.total }),
-            },
-        }));
-    }, [t]);
-
-    const handleEmbedComplete = useCallback((data: EmbedCompleteEvent) => {
-        setEmbedActionStates(prev => ({
-            ...prev,
-            [data.project_id]: {
-                status: 'success',
-                totalNodes: data.total_nodes,
-                newEmbeddings: data.new_embeddings,
-                updatedEmbeddings: data.updated_embeddings,
-                message: t('projects.embeddingDone', { new: data.new_embeddings, updated: data.updated_embeddings }),
-            },
-        }));
-        // Refresh embed status
-        loadEmbedStatusForProject(data.project_id);
-        // Auto-reset to idle after 2 seconds
-        setTimeout(() => {
-            setEmbedActionStates(prev => {
-                const newState = { ...prev };
-                delete newState[data.project_id];
-                return newState;
-            });
-        }, 2000);
-    }, [loadEmbedStatusForProject]);
-
-    const handleEmbedError = useCallback((data: EmbedErrorEvent) => {
-        setEmbedActionStates(prev => ({
-            ...prev,
-            [data.project_id]: {
-                status: 'error',
-                error: data.error,
-                message: data.error,
-            },
-        }));
-        // Auto-reset to idle after 3 seconds
-        setTimeout(() => {
-            setEmbedActionStates(prev => {
-                const newState = { ...prev };
-                delete newState[data.project_id];
-                return newState;
-            });
-        }, 3000);
-    }, []);
-
-    // Subscribe to SSE events
-    useEventStream({
-        onEmbedProgress: handleEmbedProgress,
-        onEmbedComplete: handleEmbedComplete,
-        onEmbedError: handleEmbedError,
-    });
-
-    const handleEmbedProject = async (e: React.MouseEvent, project: Project) => {
-        e.stopPropagation();
-        // Don't allow starting if already running
-        if (embedActionStates[project.id]?.status === 'running') {
-            return;
-        }
-        // Set initial running state
-        setEmbedActionStates(prev => ({
-            ...prev,
-            [project.id]: {
-                status: 'running',
-                message: t('projects.startingEmbedding'),
-            },
-        }));
-        try {
-            await triggerEmbed({ strategy: 'incremental', projectId: project.id });
-        } catch (err) {
-            console.error('Failed to trigger embedding:', err);
-            // Set error state
-            setEmbedActionStates(prev => ({
-                ...prev,
-                [project.id]: {
-                    status: 'error',
-                    error: err instanceof Error ? err.message : t('projects.embeddingFailed'),
-                    message: err instanceof Error ? err.message : t('projects.embeddingFailed'),
-                },
-            }));
-            // Auto-reset after 3 seconds
-            setTimeout(() => {
-                setEmbedActionStates(prev => {
-                    const newState = { ...prev };
-                    delete newState[project.id];
-                    return newState;
-                });
-            }, 3000);
-        }
-    };
-
-    const startBuildForProject = async (project: Project) => {
-        setBuildingProjectId(project.id);
-
-        try {
-            const task = await startBuild({
-                root_dir: project.root_path,
-                full_build: true,
-                project_id: project.id,
-            });
-
-            // Poll for task status
-            const pollInterval = setInterval(async () => {
-                try {
-                    const status = await fetchTaskStatus(task.task_id);
-                    console.log('[ProjectSelector] Task status:', status.status, 'task_id:', task.task_id);
-                    if (status.status === 'complete') {
-                        clearInterval(pollInterval);
-                        setBuildingProjectId(null);
-                        // Clear global building state (in case SSE event was missed)
-                        console.log('[ProjectSelector] Build complete, fetching graph for project:', project.id);
-                        markProjectBuilding(project.id, false);
-                        // Fetch graph directly since SSE event might be missed
-                        try {
-                            const graphData = await fetchGraph({
-                                projectId: project.id,
-                                filterConnected: true,
-                                includeStats: true,
-                            });
-                            console.log('[ProjectSelector] Graph loaded after build:', {
-                                nodes: graphData.nodes?.length || 0,
-                                relationships: graphData.relationships?.length || 0
-                            });
-                            setGraph(graphData);
-                        } catch (err) {
-                            console.error('[ProjectSelector] Failed to fetch graph after build:', err);
-                        }
-                    } else if (status.status === 'error') {
-                        clearInterval(pollInterval);
-                        setBuildingProjectId(null);
-                        markProjectBuilding(project.id, false);
-                    }
-                } catch (err) {
-                    clearInterval(pollInterval);
-                    setBuildingProjectId(null);
-                    markProjectBuilding(project.id, false);
-                }
-            }, 1000);
-        } catch (err) {
-            setBuildingProjectId(null);
-            markProjectBuilding(project.id, false);
-        }
-    };
-
+    // ─── Import handlers ─────────────────────────────────────
     const handleImportProject = async (path: string, watchEnabled?: boolean) => {
-        if (!path.trim()) {
-            return;
-        }
-
+        if (!path.trim()) return;
         const name = extractProjectName(path.trim());
         setLoading(true);
         try {
-            console.log('Creating project:', name, path.trim());
             const project = await createProject(name, path.trim());
-            console.log('Project created:', project);
-
-            // Add to recent paths
             addRecentPath(path.trim(), name);
-
-            // Mark project as building BEFORE setting as current
-            console.log('[ProjectSelector] Marking project as building:', project.id);
             markProjectBuilding(project.id, true);
-
-            // Set currentProject and clear graph BEFORE loadProjects to avoid a
-            // render window where projects.length > 0 but currentProject is null,
-            // which would incorrectly flash the DropZone.
             setGraph(null);
             setCurrentProject(project);
-
             await loadProjects();
             setIsImportOpen(false);
-            // Auto-trigger build
-            await startBuildForProject(project);
-            // Start watching if enabled (after build completes and graph is loaded)
+            await startBuild(project);
             if (watchEnabled) {
                 try {
                     await startProjectWatch(project.id);
-                    setWatchStatus(prev => ({
-                        ...prev,
-                        [project.id]: { is_running: true, watch_enabled: true }
-                    }));
-                } catch (err) {
-                    console.error('Failed to start watch:', err);
-                }
+                } catch (err) { console.error('Failed to start watch:', err); }
             }
         } catch (err) {
             console.error('Failed to create project:', err);
             alert(err instanceof Error ? err.message : t('projects.createFailed'));
-        } finally {
-            setLoading(false);
-        }
+        } finally { setLoading(false); }
     };
 
     // Handle newly created project (project already exists in backend, no need to create again)
     const handleProjectCreated = async (project: { id: string; name: string; root_path: string }, watchEnabled?: boolean) => {
         setLoading(true);
         try {
-            console.log('Project already created in backend:', project);
-
-            // Add to recent paths
             addRecentPath(project.root_path, project.name);
-
-            // Mark project as building BEFORE setting as current
-            console.log('[ProjectSelector] Marking project as building:', project.id);
             markProjectBuilding(project.id, true);
-
-            // Set currentProject and clear graph BEFORE loadProjects to avoid a
-            // render window where projects.length > 0 but currentProject is null,
-            // which would incorrectly flash the DropZone.
             setGraph(null);
             setCurrentProject(project as Project);
-
             await loadProjects();
             setIsImportOpen(false);
-            // Auto-trigger build
-            await startBuildForProject(project as Project);
-            // Start watching if enabled (after build completes and graph is loaded)
+            await startBuild(project as Project);
             if (watchEnabled) {
                 try {
                     await startProjectWatch(project.id);
-                    setWatchStatus(prev => ({
-                        ...prev,
-                        [project.id]: { is_running: true, watch_enabled: true }
-                    }));
-                } catch (err) {
-                    console.error('Failed to start watch:', err);
-                }
+                } catch (err) { console.error('Failed to start watch:', err); }
             }
         } catch (err) {
             console.error('Failed to handle created project:', err);
             alert(err instanceof Error ? err.message : t('projects.handleFailed'));
-        } finally {
-            setLoading(false);
-        }
+        } finally { setLoading(false); }
     };
 
-    // Handle re-import from recent paths
     const handleReimport = async (recentPath: RecentImportPath) => {
         await handleImportProject(recentPath.path, false);
     };
 
-    // Handle remove from recent paths
     const handleRemoveRecent = (e: React.MouseEvent, path: string) => {
         e.stopPropagation();
         removeRecentPath(path);
@@ -367,7 +138,7 @@ export function ProjectSelector({ onProjectSelect }: ProjectSelectorProps) {
         !projects.some(p => p.root_path === rp.path)
     );
 
-    const handleDeleteProject = async (e: React.MouseEvent, project: Project) => {
+    const handleDeleteClick = (e: React.MouseEvent, project: Project) => {
         e.stopPropagation();
         setDeleteProjectInfo(project);
     };
@@ -376,71 +147,10 @@ export function ProjectSelector({ onProjectSelect }: ProjectSelectorProps) {
         if (!deleteProjectInfo) return;
         const project = deleteProjectInfo;
         setDeleteProjectInfo(null);
-
-        try {
-            const isDeletingCurrent = currentProject?.id === project.id;
-            await deleteProject(project.id);
-            // Fetch updated project list directly, then decide next project
-            const result = await fetchProjects();
-            const remaining = (result.projects || []).filter((p: Project) => p.id !== project.id);
-            // Sync projects state
-            await loadProjects();
-            if (isDeletingCurrent) {
-                setGraph(null);
-                // Directly set next project without relying on loadProjects auto-select
-                setCurrentProject(remaining.length > 0 ? remaining[0] : null);
-            }
-        } catch (err) {
-            console.error('Failed to delete project:', err);
-        }
+        await deleteProjectAction(project);
     };
 
-    const handleToggleWatch = async (e: React.MouseEvent, project: Project) => {
-        e.stopPropagation();
-        try {
-            const status = watchStatus[project.id];
-            if (status?.is_running) {
-                await stopProjectWatch(project.id);
-                setWatchStatus(prev => ({
-                    ...prev,
-                    [project.id]: { is_running: false, watch_enabled: false }
-                }));
-            } else {
-                await startProjectWatch(project.id);
-                setWatchStatus(prev => ({
-                    ...prev,
-                    [project.id]: { is_running: true, watch_enabled: true }
-                }));
-            }
-        } catch (err) {
-            console.error('Failed to toggle watch:', err);
-        }
-    };
-
-    // Load watch status for current project
-    useEffect(() => {
-        if (currentProject) {
-            fetchProjectWatchStatus(currentProject.id)
-                .then(status => {
-                    setWatchStatus(prev => ({
-                        ...prev,
-                        [currentProject.id]: {
-                            is_running: status.is_running,
-                            watch_enabled: status.watch_enabled
-                        }
-                    }));
-                })
-                .catch(err => console.error('Failed to fetch watch status:', err));
-        }
-    }, [currentProject]);
-
-    // Load embed status for current project
-    useEffect(() => {
-        if (currentProject) {
-            loadEmbedStatusForProject(currentProject.id);
-        }
-    }, [currentProject, loadEmbedStatusForProject]);
-
+    // ─── Render ──────────────────────────────────────────────
     return (
         <>
             <div className="w-80 bg-surface border border-border-subtle rounded-lg shadow-xl overflow-hidden">
@@ -453,6 +163,7 @@ export function ProjectSelector({ onProjectSelect }: ProjectSelectorProps) {
                     ) : (
                         projects.map((project) => {
                             const isCurrent = currentProject?.id === project.id;
+                            const embedState: EmbedActionState | undefined = embedActionStates[project.id];
                             return (
                                 <button
                                     key={project.id}
@@ -488,7 +199,7 @@ export function ProjectSelector({ onProjectSelect }: ProjectSelectorProps) {
                                         </span>
                                     )}
                                     <button
-                                        onClick={(e) => handleToggleWatch(e, project)}
+                                        onClick={(e) => { e.stopPropagation(); toggleWatch(project); }}
                                         className="opacity-0 group-hover:opacity-100 p-1 hover:bg-blue-500/20 rounded transition-all"
                                         title={watchStatus[project.id]?.is_running ? t('projects.stopWatching') : t('projects.startWatching')}
                                     >
@@ -499,33 +210,33 @@ export function ProjectSelector({ onProjectSelect }: ProjectSelectorProps) {
                                         )}
                                     </button>
                                     <button
-                                        onClick={(e) => handleEmbedProject(e, project)}
-                                        disabled={embedActionStates[project.id]?.status === 'running'}
-                                        className={`p-1 rounded transition-all ${embedActionStates[project.id]?.status === 'running'
+                                        onClick={(e) => { e.stopPropagation(); triggerProjectEmbed(project); }}
+                                        disabled={embedState?.status === 'running'}
+                                        className={`p-1 rounded transition-all ${embedState?.status === 'running'
                                             ? 'opacity-100'
-                                            : embedActionStates[project.id]?.status === 'success'
+                                            : embedState?.status === 'success'
                                                 ? 'opacity-100 animate-embed-success bg-green-500/20'
-                                                : embedActionStates[project.id]?.status === 'error'
+                                                : embedState?.status === 'error'
                                                     ? 'opacity-100 animate-embed-error bg-red-500/20'
                                                     : 'opacity-0 group-hover:opacity-100 hover:bg-accent/20'
                                             }`}
                                         title={
-                                            embedActionStates[project.id]?.status === 'running'
-                                                ? embedActionStates[project.id].message || t('projects.startingEmbedding')
-                                                : embedActionStates[project.id]?.status === 'success'
-                                                    ? t('projects.embedSuccess', { new: embedActionStates[project.id].newEmbeddings, updated: embedActionStates[project.id].updatedEmbeddings })
-                                                    : embedActionStates[project.id]?.status === 'error'
-                                                        ? `Error: ${embedActionStates[project.id].error}`
+                                            embedState?.status === 'running'
+                                                ? embedState.message || t('projects.startingEmbedding')
+                                                : embedState?.status === 'success'
+                                                    ? t('projects.embedSuccess', { new: embedState.newEmbeddings, updated: embedState.updatedEmbeddings })
+                                                    : embedState?.status === 'error'
+                                                        ? `Error: ${embedState.error}`
                                                         : embedStatus[project.id]?.needs_reembedding
                                                             ? t('projects.reembed', { desc: embedStatus[project.id]?.embedding_count ?? 0, code: embedStatus[project.id]?.code_embedding_count ?? 0 })
                                                             : t('projects.embedProject', { desc: embedStatus[project.id]?.embedding_count ?? 0, code: embedStatus[project.id]?.code_embedding_count ?? 0 })
                                         }
                                     >
-                                        {embedActionStates[project.id]?.status === 'running' ? (
+                                        {embedState?.status === 'running' ? (
                                             <Layers className="w-3.5 h-3.5 text-accent animate-embed-pulse" />
-                                        ) : embedActionStates[project.id]?.status === 'success' ? (
+                                        ) : embedState?.status === 'success' ? (
                                             <CheckCircle className="w-3.5 h-3.5 text-green-500" />
-                                        ) : embedActionStates[project.id]?.status === 'error' ? (
+                                            ) : embedState?.status === 'error' ? (
                                             <AlertCircle className="w-3.5 h-3.5 text-red-500" />
                                         ) : (
                                             <Layers className={`w-3.5 h-3.5 ${embedStatus[project.id]?.needs_reembedding ? 'text-yellow-400' : 'text-accent'}`} />
@@ -533,10 +244,7 @@ export function ProjectSelector({ onProjectSelect }: ProjectSelectorProps) {
                                     </button>
                                     {/* Build button */}
                                     <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            startBuildForProject(project);
-                                        }}
+                                        onClick={(e) => { e.stopPropagation(); startBuild(project); }}
                                         disabled={buildingProjectId === project.id}
                                         className={`p-1 rounded transition-all ${buildingProjectId === project.id
                                             ? 'opacity-100'
@@ -551,7 +259,7 @@ export function ProjectSelector({ onProjectSelect }: ProjectSelectorProps) {
                                         )}
                                     </button>
                                     <button
-                                        onClick={(e) => handleDeleteProject(e, project)}
+                                        onClick={(e) => handleDeleteClick(e, project)}
                                         className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 rounded transition-all"
                                         title={t('projects.deleteProject')}
                                     >

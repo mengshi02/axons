@@ -281,11 +281,20 @@ function registerIpcHandlers(daemonAddr: string) {
       }
     }
   });
+
+  // Update project list in the File menu — renderer sends projects on change
+  ipcMain.handle('update-projects-menu', (_event, projects: Array<{ id: string; name: string; root_path: string }>) => {
+    cachedProjects = projects || [];
+    rebuildFileMenu(daemonAddr);
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
 //  Application Menu
 // ═══════════════════════════════════════════════════════════════
+
+/** Cached project list for dynamic File menu updates */
+let cachedProjects: Array<{ id: string; name: string; root_path: string }> = [];
 
 function createAppMenu(daemonAddr: string) {
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -300,7 +309,7 @@ function createAppMenu(daemonAddr: string) {
           accelerator: 'CmdOrCtrl+,',
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.loadURL(`http://${daemonAddr}/settings`);
+              mainWindow.webContents.send('open-panel', 'settings');
             }
           },
         },
@@ -314,16 +323,16 @@ function createAppMenu(daemonAddr: string) {
         { role: 'quit' },
       ],
     },
-    // File menu
+    // File menu — with dynamic project list
     {
       label: 'File',
       submenu: [
         {
-          label: 'New Project',
+          label: 'New Project...',
           accelerator: 'CmdOrCtrl+N',
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.loadURL(`http://${daemonAddr}/new`);
+              mainWindow.webContents.send('menu-action', 'new-project');
             }
           },
         },
@@ -332,10 +341,12 @@ function createAppMenu(daemonAddr: string) {
           accelerator: 'CmdOrCtrl+O',
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.loadURL(`http://${daemonAddr}/open`);
+              mainWindow.webContents.send('menu-action', 'open-project');
             }
           },
         },
+        { type: 'separator' },
+        // Dynamic project entries are inserted here by rebuildFileMenu()
         { type: 'separator' },
         { role: 'close' },
       ],
@@ -360,6 +371,32 @@ function createAppMenu(daemonAddr: string) {
     {
       label: 'View',
       submenu: [
+        {
+          label: 'Files',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('open-panel', 'fileTree');
+            }
+          },
+        },
+        {
+          label: 'AI Assistant',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('open-panel', 'rightPanel');
+            }
+          },
+        },
+        { type: 'separator' },
+        {
+          label: 'Terminal',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('open-panel', 'terminal');
+            }
+          },
+        },
+        { type: 'separator' },
         { role: 'reload' },
         { role: 'forceReload' },
         { role: 'toggleDevTools' },
@@ -398,6 +435,149 @@ function createAppMenu(daemonAddr: string) {
   ];
 
   const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
+
+/**
+ * Rebuild the File menu with the current project list.
+ * Called whenever the renderer sends an updated project list via IPC.
+ */
+function rebuildFileMenu(daemonAddr: string) {
+  // Build project submenu items
+  const projectItems: Electron.MenuItemConstructorOptions[] = cachedProjects.length === 0
+    ? [{ label: 'No Projects Yet', enabled: false }]
+    : cachedProjects.map((p, idx) => ({
+      label: p.name,
+      accelerator: idx < 9 ? `CmdOrCtrl+${idx + 1}` as string : undefined,
+      click: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('menu-action', 'switch-project', p.id);
+        }
+      },
+    }));
+
+  const fileSubmenu: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'New Project...',
+      accelerator: 'CmdOrCtrl+N',
+      click: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('menu-action', 'new-project');
+        }
+      },
+    },
+    {
+      label: 'Open Project...',
+      accelerator: 'CmdOrCtrl+O',
+      click: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('menu-action', 'open-project');
+        }
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Open Recent',
+      submenu: projectItems,
+    },
+    { type: 'separator' },
+    { role: 'close' },
+  ];
+
+  // Rebuild the entire menu from template
+  const appMenu: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: APP_NAME,
+      submenu: [
+        { role: 'about', label: `About ${APP_NAME}` },
+        { type: 'separator' },
+        {
+          label: 'Preferences...',
+          accelerator: 'CmdOrCtrl+,',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('open-panel', 'settings');
+            }
+          },
+        },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    { label: 'File', submenu: fileSubmenu },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'delete' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        {
+          label: 'Files',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('open-panel', 'fileTree');
+            }
+          },
+        },
+        {
+          label: 'AI Assistant',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('open-panel', 'rightPanel');
+            }
+          },
+        },
+        { type: 'separator' },
+        {
+          label: 'Terminal',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('open-panel', 'terminal');
+            }
+          },
+        },
+        { type: 'separator' },
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    { role: 'window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }] },
+    {
+      role: 'help',
+      submenu: [
+        { label: 'Official Website', click: () => shell.openExternal(WEBSITE_URL) },
+        { type: 'separator' },
+        { label: 'Report an Issue', click: () => shell.openExternal(ISSUES_URL) },
+        { label: 'Release Notes', click: () => shell.openExternal(RELEASES_URL) },
+      ],
+    },
+  ];
+
+  const menu = Menu.buildFromTemplate(appMenu);
   Menu.setApplicationMenu(menu);
 }
 

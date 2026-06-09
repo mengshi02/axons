@@ -23,6 +23,7 @@
   "build": {
     "appId": "chat.axons.desktop",
     "productName": "Axons",
+    "artifactName": "axons-desktop-${os}-${arch}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -30,6 +31,7 @@
       "dist/**/*"
     ],
     "afterPack": "./scripts/afterPack.js",
+    "afterArtifactBuild": "./scripts/afterArtifactBuild.js",
     "extraResources": [
       {
         "from": "bin/axons-daemon",
@@ -37,6 +39,7 @@
       }
     ],
     "mac": {
+      "artifactName": "axons-desktop-macos-${arch}.${ext}",
       "icon": "build/appicon.png",
       "category": "public.app-category.developer-tools",
       "target": [
@@ -64,6 +67,7 @@
       ]
     },
     "win": {
+      "artifactName": "axons-desktop-windows-${arch}.${ext}",
       "target": [
         {
           "target": "nsis",
@@ -78,6 +82,7 @@
       "allowToChangeInstallationDirectory": true
     },
     "linux": {
+      "artifactName": "axons-desktop-linux-${arch}.${ext}",
       "target": [
         {
           "target": "AppImage",

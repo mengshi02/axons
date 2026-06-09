@@ -2,6 +2,70 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.1.0 (2026-06-09)
+
+### Highlights
+
+**Desktop Runtime Migration**: Migrated from Wails v3 to Electron, bringing native desktop integration with splash screen, external link handling, and macOS universal binary support.
+
+**IDE-Grade Terminal**: Overhauled terminal experience with xterm 6 built-in scrollbar, pixel-precise resize, drag-resize jitter elimination, and content-jump prevention.
+
+**UI Performance**: React.memo wrapping across all panels, virtualized lists for large datasets, and CSS containment for layout performance optimization.
+
+**File Preview**: Image and video file preview support, with binary file content detection to prevent garbled text display.
+
+### Features
+
+**Desktop**:
+- Migrate desktop runtime from Wails v3 to Electron
+- Add splash window (Axons logo + spinner) for instant visual feedback on startup
+- Parallelize daemon start and BrowserWindow creation for faster startup
+- Add desktop external link handling (open in system browser)
+- Publish using the `axons-{product}-{os}-{arch}.{ext}` format specification
+- Support macOS universal binary and single-arch builds (x64/arm64)
+- Optimize daemon port detection: event-driven resolve instead of polling
+
+**Terminal**:
+- Adopt xterm 6 built-in scrollbar and fix drag-resize jitter
+- IDE-grade terminal resize with pixel-precise dimensions (replacing fitAddon.proposeDimensions)
+- Prevent content jump and bottom grey strip on resize
+- Save scroll position before fitAddon.fit(); scrollToBottom() after if user was at bottom
+- Make xterm-viewport background transparent to remove grey strip in light theme
+
+**UI**:
+- Improve graph toolbar layout and context menu portal
+- Improve diff modal display
+- Add video file preview support
+- Preview image files instead of showing garbled binary text
+- Filter binary files in code panel using content detection
+- Add desktop external link handling and refactor dead code/hotspot analysis
+- Adopt IDE-style neutral menus
+- Prevent WKWebView elastic bounce when scrolling past the edge
+
+### Performance
+
+- Wrap all panel components with React.memo to prevent unnecessary re-renders
+- Stabilize callback props via useCallback/useRef cache to ensure React.memo works correctly
+- Wrap AppProvider context value in useMemo with explicit deps to avoid re-rendering all consumers
+- Add @tanstack/react-virtual virtualized lists to CodeHealthPanel, GraphAnalyticsPanel, and ImpactAnalysisPanel for large dataset performance
+- Add CSS containment to center column for layout performance
+- Optimize terminal resize performance with requestAnimationFrame batching
+- Scrollbar global boundary optimization
+
+### Bug Fixes
+
+- Fix terminal panel flash on resize
+- Fix terminal drag-resize jitter caused by Y-axis resize over-frequency
+- Fix terminal content jump and bottom grey strip on resize
+- Fix FileTree expand race conditions
+- Fix single-arch build always producing universal binary
+- Fix missing afterPack.js hook for Electron universal build
+- Fix scrollbar UX issues
+
+### Breaking Changes
+
+- Desktop runtime changed from Wails v3 to Electron. Build system and packaging commands have been updated accordingly.
+
 ## v1.0.0 (2026-05-25)
 
 ### Highlights

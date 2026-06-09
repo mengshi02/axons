@@ -1,5 +1,5 @@
 import {
-    Home, FolderTree, Sparkles, Settings, Puzzle,
+    FolderTree, Sparkles, Settings, Puzzle,
     Activity, BarChart3, Radar, Route, ArrowLeftRight,
     Shield, Workflow, Terminal, Code2,
 } from 'lucide-react';
@@ -7,13 +7,12 @@ import { useTranslation } from 'react-i18next';
 import { useAppStateSelector } from '../hooks/useAppStateSelector';
 import React, { useState, useRef, useEffect, type ComponentType } from 'react';
 import { useIframePointerEvents } from '../hooks/useIframePointerEvents';
-import { ProjectSelector } from './ProjectSelector';
 import type { PanelDef } from '../lib/panelRegistry';
 
 // Icon name → component mapping for activityBar buttons
 // Covers all built-in panel icons; plugin icons use URL or Puzzle fallback
 const ICON_MAP: Record<string, ComponentType<{ className?: string }>> = {
-    Home, FolderTree, Sparkles, Settings, Puzzle,
+    FolderTree, Sparkles, Settings, Puzzle,
     Activity, BarChart3, Radar, Route, ArrowLeftRight,
     Shield, Workflow, Terminal, Code2,
 };
@@ -34,21 +33,16 @@ export const ActivityBar = React.memo(function ActivityBar(_props: ActivityBarPr
     }));
     const { t } = useTranslation();
 
-    const [isHomeOpen, setIsHomeOpen] = useState(false);
     const [isGearMenuOpen, setIsGearMenuOpen] = useState(false);
-    const homeRef = useRef<HTMLDivElement>(null);
     const gearRef = useRef<HTMLDivElement>(null);
 
     // When any popup is open, disable iframe pointer-events so clicks penetrate
     // to the host document and trigger click-outside closing logic
-    useIframePointerEvents(isHomeOpen || isGearMenuOpen);
+    useIframePointerEvents(isGearMenuOpen);
 
-    // Click outside to close Home panel and GearMenu
+    // Click outside to close GearMenu
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
-            if (homeRef.current && !homeRef.current.contains(e.target as Node)) {
-                setIsHomeOpen(false);
-            }
             if (gearRef.current && !gearRef.current.contains(e.target as Node)) {
                 setIsGearMenuOpen(false);
             }
@@ -63,21 +57,14 @@ export const ActivityBar = React.memo(function ActivityBar(_props: ActivityBarPr
             : 'text-text-muted hover:text-text-primary hover:bg-hover'
         }`;
 
-    /** Resolve panel active state — handles both registry-driven and legacy state */
+    /** Resolve panel active state */
     const isPanelActive = (panel: PanelDef): boolean => {
-        // Home popup: use local state
-        if (panel.id === 'home') return isHomeOpen;
-        // All others: check openPanels set (unified via panelRegistry)
         return openPanels.has(panel.id);
     };
 
     /** Handle panel button click — activityBar panels are mutually exclusive */
     const handlePanelClick = (panel: PanelDef) => {
-        if (panel.id === 'home') {
-            setIsHomeOpen(prev => !prev);
-        } else {
-            togglePanel(panel.id);
-        }
+        togglePanel(panel.id);
     };
 
     /** Render panel icon: lucide name → ICON_MAP, URL → img, fallback → Puzzle */
@@ -106,24 +93,10 @@ export const ActivityBar = React.memo(function ActivityBar(_props: ActivityBarPr
                     const isActive = isPanelActive(panel);
                     const displayTitle = panel.title.includes(':') ? t(panel.title) : panel.title;
 
-                    // Home panel: wrap with ref for click-outside popup
+                    // Home panel: hidden — project list is in File menu (web) / native menu (desktop).
+                    // Import dialog is triggered by menu action or footer buttons.
                     if (panel.id === 'home') {
-                        return (
-                            <div className="relative w-full" ref={homeRef} key={panel.id}>
-                                <button
-                                    onClick={() => handlePanelClick(panel)}
-                                    className={iconBtnClass(isActive)}
-                                    title={displayTitle}
-                                >
-                                    {renderPanelIcon(panel)}
-                                </button>
-                                {isHomeOpen && (
-                                    <div className="absolute left-11 top-0 z-50">
-                                        <ProjectSelector onProjectSelect={() => setIsHomeOpen(false)} />
-                                    </div>
-                                )}
-                            </div>
-                        );
+                        return null;
                     }
 
                     // All other panels: simple toggle button

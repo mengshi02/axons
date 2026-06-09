@@ -3,6 +3,8 @@ import { useAppStateSelector } from '../hooks/useAppStateSelector';
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useIframePointerEvents } from '../hooks/useIframePointerEvents';
+import { getRuntimeMode } from '../lib/config';
+import { MenuBar } from './MenuBar';
 import type { GraphNode } from '../types/graph';
 import type { SearchResult } from '../types/graph';
 import { searchCode } from '../services/api';
@@ -204,8 +206,12 @@ export const TopSearchBar = React.memo(function TopSearchBar({ onFocusNode, noti
             className="flex items-center px-3 py-0.5 bg-deep border-b border-border-subtle"
             style={{ '--desktop-draggable': 'drag' } as React.CSSProperties}
         >
-            {/* Spacer for macOS traffic lights + centering */}
-            <div className="flex-1" />
+            {/* Left side: MenuBar in web mode, spacer in desktop mode */}
+            {getRuntimeMode() === 'web' ? (
+                <MenuBar />
+            ) : (
+                <div className="flex-1" />
+            )}
 
             {/* Search - centered */}
             <div className="flex-1 max-w-lg relative" ref={searchRef} style={{ '--desktop-draggable': 'no-drag' } as React.CSSProperties}>

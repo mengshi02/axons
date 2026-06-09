@@ -2,10 +2,12 @@ import React from 'react';
 import {
     Activity, BarChart3, Radar, Route, ArrowLeftRight,
     Shield, Workflow, Terminal, CircleDot, Waypoints, Bell,
+    Eye, EyeOff, Layers, Play, Trash2, Loader2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAppStateSelector } from '../hooks/useAppStateSelector';
 import { useNotifications } from '../hooks/useNotifications';
+import { useProjectActions, type EmbedActionState } from '../hooks/useProjectActions';
 import type { PanelDef } from '../lib/panelRegistry';
 
 // Icon name → component mapping for footer buttons
@@ -35,7 +37,31 @@ function FooterButton({ panel, isActive, onToggle, iconClass, btnBase, activeCla
             title={displayTitle}
         >
             {IconComponent && <IconComponent className={iconClass} />}
-            <span>{displayTitle}</span>
+        </button>
+    );
+}
+
+/** 渲染工程操作按钮（watch/embed/build/delete） */
+function ProjectActionButton({ icon, label, active, spinning, disabled, onClick, btnBase, iconClass, activeClass, inactiveClass }: {
+    icon: React.ReactNode;
+    label: string;
+    active?: boolean;
+    spinning?: boolean;
+    disabled?: boolean;
+    onClick: () => void;
+    btnBase: string;
+    iconClass: string;
+    activeClass: string;
+    inactiveClass: string;
+}) {
+    return (
+        <button
+            onClick={onClick}
+            disabled={disabled}
+            className={`${btnBase} ${active ? 'border-accent ' + activeClass : 'border-transparent ' + inactiveClass} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+            title={label}
+        >
+            {spinning ? <Loader2 className={`${iconClass} animate-spin`} /> : icon}
         </button>
     );
 }
@@ -44,15 +70,27 @@ export const Footer = React.memo(function Footer() {
     const { t } = useTranslation();
     const {
         graph,
+        currentProject,
         openPanels,
         togglePanel,
         getPanelsByActivator,
     } = useAppStateSelector(s => ({
         graph: s.graph,
+        currentProject: s.currentProject,
         openPanels: s.openPanels,
         togglePanel: s.togglePanel,
         getPanelsByActivator: s.getPanelsByActivator,
     }));
+
+    const {
+        buildingProjectId,
+        watchStatus,
+        embedActionStates,
+        startBuild,
+        toggleWatch,
+        triggerProjectEmbed,
+        deleteProjectAction,
+    } = useProjectActions();
 
     // Notification summary: show latest unread notification in footer center
     const { notifications, unreadCount } = useNotifications();
@@ -74,6 +112,13 @@ export const Footer = React.memo(function Footer() {
     const leftPanels = footerPanels.filter(p => (p.footerSlot ?? 'left') === 'left');
     const centerPanels = footerPanels.filter(p => p.footerSlot === 'center');
     const rightPanels = footerPanels.filter(p => p.footerSlot === 'right');
+
+    // 工程操作状态
+    const projectId = currentProject?.id;
+    const isBuilding = buildingProjectId === projectId;
+    const isWatching = projectId ? watchStatus[projectId]?.is_running ?? false : false;
+    const embedState: EmbedActionState | undefined = projectId ? embedActionStates[projectId] : undefined;
+    const isEmbedding = embedState?.status === 'running';
 
     return (
         <footer className="h-6 flex items-center justify-between bg-surface border-t border-border-subtle select-none shrink-0">
@@ -124,8 +169,55 @@ export const Footer = React.memo(function Footer() {
                 )}
             </div>
 
-            {/* Right section: footerSlot='right' — 独立功能区 */}
+            {/* Right section: 工程操作按钮 (Watch / Embed / Build / Delete) */}
             <div className="flex items-center h-full">
+                {currentProject && (
+                    <>
+                        <ProjectActionButton
+                            icon={isWatching ? <EyeOff className={iconClass} /> : <Eye className={iconClass} />}
+                            label={isWatching ? t('activitybar:projects.stopWatch') : t('activitybar:projects.watch')}
+                            active={isWatching}
+                            onClick={() => toggleWatch(currentProject)}
+                            btnBase={btnBase}
+                            iconClass={iconClass}
+                            activeClass={activeClass}
+                            inactiveClass={inactiveClass}
+                        />
+                        <ProjectActionButton
+                            icon={<Layers className={iconClass} />}
+                            label={isEmbedding ? (embedState?.message || t('activitybar:projects.embedding')) : t('activitybar:projects.embed')}
+                            active={isEmbedding}
+                            spinning={isEmbedding}
+                            disabled={isEmbedding}
+                            onClick={() => triggerProjectEmbed(currentProject)}
+                            btnBase={btnBase}
+                            iconClass={iconClass}
+                            activeClass={activeClass}
+                            inactiveClass={inactiveClass}
+                        />
+                        <ProjectActionButton
+                            icon={<Play className={iconClass} />}
+                            label={isBuilding ? t('activitybar:projects.building') : t('activitybar:projects.build')}
+                            active={isBuilding}
+                            spinning={isBuilding}
+                            disabled={isBuilding}
+                            onClick={() => startBuild(currentProject)}
+                            btnBase={btnBase}
+                            iconClass={iconClass}
+                            activeClass={activeClass}
+                            inactiveClass={inactiveClass}
+                        />
+                        <ProjectActionButton
+                            icon={<Trash2 className={iconClass} />}
+                            label={t('activitybar:projects.delete')}
+                            onClick={() => deleteProjectAction(currentProject)}
+                            btnBase={btnBase}
+                            iconClass={iconClass}
+                            activeClass={activeClass}
+                            inactiveClass={inactiveClass}
+                        />
+                    </>
+                )}
                 {rightPanels.map(panel => (
                     <FooterButton
                         key={panel.id}

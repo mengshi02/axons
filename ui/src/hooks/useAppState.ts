@@ -970,7 +970,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     registerPanel({ id: 'sequencePanel', title: 'panels:sequence.title', icon: 'ArrowLeftRight', location: 'left', activator: 'footer', component: SequencePanel, order: 4 });
     registerPanel({ id: 'archRulesPanel', title: 'panels:rules.title', icon: 'Shield', location: 'modal', activator: 'footer', component: ArchRulesPanel, order: 5 });
     registerPanel({ id: 'processPanel', title: 'panels:flow.title', icon: 'Workflow', location: 'modal', activator: 'footer', component: ProcessPanel, order: 6 });
-    registerPanel({ id: 'terminal', title: 'activitybar:terminal.title', icon: 'Terminal', location: 'center-bottom', activator: 'footer', footerSlot: 'right', standalone: false, component: TerminalPanel, order: 7 });
+    registerPanel({ id: 'terminal', title: 'activitybar:terminal.title', icon: 'Terminal', location: 'center-bottom', activator: 'command', standalone: false, component: TerminalPanel, order: 7 });
 
     // --- node-select ---
     registerPanel({ id: 'codePanel', title: 'activitybar:code', icon: 'Code2', location: 'right', activator: 'node-select', component: CodeReferencesPanel, order: 1 });

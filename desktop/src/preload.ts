@@ -18,4 +18,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   /** Check if running in Electron (always true when this preload is loaded) */
   isElectron: true,
+
+  /** Update the project list in the native File menu */
+  updateProjectsMenu: (projects: Array<{ id: string; name: string; root_path: string }>) =>
+    ipcRenderer.invoke('update-projects-menu', projects),
+
+  /** Listen for menu actions from the native menu bar */
+  onMenuAction: (callback: (action: string, data?: string) => void) => {
+    ipcRenderer.on('menu-action', (_event, action: string, data?: string) => callback(action, data));
+  },
+
+  /** Listen for open-panel events from the native menu bar */
+  onOpenPanel: (callback: (panelId: string) => void) => {
+    ipcRenderer.on('open-panel', (_event, panelId: string) => callback(panelId));
+  },
 });

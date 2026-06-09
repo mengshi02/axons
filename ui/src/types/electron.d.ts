@@ -14,6 +14,15 @@ interface ElectronAPI {
 
   /** Check if running in Electron desktop mode */
   isElectron: boolean;
+
+  /** Update the project list in the native File menu */
+  updateProjectsMenu: (projects: Array<{ id: string; name: string; root_path: string }>) => Promise<void>;
+
+  /** Listen for menu actions from the native menu bar */
+  onMenuAction: (callback: (action: string, data?: string) => void) => void;
+
+  /** Listen for open-panel events from the native menu bar */
+  onOpenPanel: (callback: (panelId: string) => void) => void;
 }
 
 interface Window {

@@ -10,9 +10,11 @@ import { useEventStream, type BuildCompleteEvent, type FileChangeEvent, type Not
 import { useRecentPaths } from './hooks/useRecentPaths';
 import { useNotifications } from './hooks/useNotifications';
 import { NotificationToast } from './components/NotificationToast';
-import { fetchGraph, fetchGraphDelta, createProject, startBuild, fetchTaskStatus } from './services/api';
+import { fetchGraph, fetchGraphDelta, createProject, startBuild, fetchTaskStatus, startProjectWatch } from './services/api';
 import { IframePluginPanel } from './components/IframePluginPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { getRuntimeMode } from './lib/config';
+import { UnifiedImportDialog } from './components/UnifiedImportDialog';
 
 function App() {
   const {
@@ -54,6 +56,15 @@ function App() {
     handleNewNotification,
   } = useNotifications();
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+
+  // Listen for global open-import-dialog event (from desktop native menu or other sources)
+  useEffect(() => {
+    const handler = () => setIsImportOpen(true);
+    window.addEventListener('open-import-dialog', handler);
+    return () => window.removeEventListener('open-import-dialog', handler);
+  }, []);
 
   // Debounce timer ref for file change events - accumulates changed files during debounce period
   const fileChangeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -198,6 +209,48 @@ function App() {
     return () => window.removeEventListener('open-settings', handler);
   }, [openSettingsPanelHandler]);
 
+  // ─── Desktop mode: IPC listeners for native menu actions ───
+  useEffect(() => {
+    if (getRuntimeMode() !== 'desktop') return;
+
+    // Listen for menu actions from Electron native menu
+    window.electronAPI?.onMenuAction((action, data) => {
+      switch (action) {
+        case 'new-project':
+        case 'open-project':
+          // Directly open the import dialog (both web & desktop)
+          window.dispatchEvent(new CustomEvent('open-import-dialog'));
+          break;
+        case 'switch-project':
+          // data is the project ID — find it in projects list and switch
+          if (data) {
+            const target = projects.find(p => p.id === data);
+            if (target) setCurrentProject(target);
+          }
+          break;
+      }
+    });
+
+    // Listen for open-panel events from Electron native menu
+    window.electronAPI?.onOpenPanel((panelId) => {
+      openPanel(panelId);
+    });
+
+    return () => {
+      // IPC listeners from contextBridge don't support clean unsubscribing
+      // in the same way, but we clean up the refs
+    };
+  }, [openPanel, setCurrentProject, projects]);
+
+  // Sync project list to Electron native File menu (desktop mode)
+  useEffect(() => {
+    if (getRuntimeMode() !== 'desktop') return;
+    if (!window.electronAPI?.updateProjectsMenu) return;
+    window.electronAPI.updateProjectsMenu(
+      projects.map(p => ({ id: p.id, name: p.name, root_path: p.root_path }))
+    );
+  }, [projects]);
+
   const handleImport = useCallback(async (path: string) => {
     const trimmed = path.trim();
     if (!trimmed) return;
@@ -280,6 +333,20 @@ function App() {
       setLoading(false);
     }
   }, [loadProjects, setCurrentProject, setLoading, setGraph, markProjectBuilding, addRecentPath]);
+
+  // Global import dialog handler (for desktop native menu Open Project)
+  const handleImportDialog = useCallback(async (path: string, watchEnabled?: boolean) => {
+    setIsImporting(true);
+    try {
+      await handleImport(path);
+      if (watchEnabled && currentProject) {
+        try { await startProjectWatch(currentProject.id); } catch { }
+      }
+      setIsImportOpen(false);
+    } finally {
+      setIsImporting(false);
+    }
+  }, [handleImport, currentProject]);
 
   const handleNodeFocus = useCallback((nodeId: string) => {
     setActiveFilePath(null); // clear file tree selection
@@ -509,7 +576,7 @@ function App() {
 
   return (
     <div className="h-screen w-screen flex flex-col bg-deep text-text-primary overflow-hidden">
-      {/* Top Search Bar */}
+      {/* Top Search Bar (includes MenuBar in web mode) */}
       <TopSearchBar
         onFocusNode={handleNodeFocus}
         notifications={notificationList}
@@ -635,6 +702,14 @@ function App() {
 
       {/* Footer - IDE style status bar */}
       <Footer />
+
+      {/* Global import dialog (opened by desktop native menu or open-import-dialog event) */}
+      <UnifiedImportDialog
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        onImport={handleImportDialog}
+        isImporting={isImporting}
+      />
     </div>
   );
 }
