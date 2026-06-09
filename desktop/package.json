@@ -1,6 +1,6 @@
 {
   "name": "axons",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Axons - Secure Native Code Analysis & Generation Agent",
   "main": "dist/main.js",
   "scripts": {
@@ -31,7 +31,6 @@
       "dist/**/*"
     ],
     "afterPack": "./scripts/afterPack.js",
-    "afterArtifactBuild": "./scripts/afterArtifactBuild.js",
     "extraResources": [
       {
         "from": "bin/axons-daemon",

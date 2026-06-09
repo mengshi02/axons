@@ -9,7 +9,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BIN_DIR="$PROJECT_DIR/bin"
 WINDOWS_DIR="$PROJECT_DIR/build/windows"
 APP_NAME="axons"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-$(cat "$PROJECT_DIR/../VERSION" 2>/dev/null || echo "1.1.0")}"
 
 echo "Creating Windows installer..."
 

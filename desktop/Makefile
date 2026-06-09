@@ -7,7 +7,7 @@ BINARY_NAME := axons-daemon
 ROOT_DIR    := ..
 DAEMON_BIN  := bin/$(BINARY_NAME)
 
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION ?= $(shell cat $(ROOT_DIR)/VERSION 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
@@ -92,14 +92,29 @@ dist: build
 ## dist-mac: Package for macOS universal (DMG + ZIP)
 dist-mac: build-daemon-mac build-electron
 	npx electron-builder --mac --universal
+	@cd release && for f in axons-desktop-mac-*.dmg axons-desktop-mac-*.zip; do \
+		[ -f "$f" ] || continue; \
+		newname="$(echo "$f" | sed 's/axons-desktop-mac-x64/axons-desktop-macos-intel/;s/axons-desktop-mac-arm64/axons-desktop-macos-arm64/')"; \
+		[ "$f" = "$newname" ] || mv "$f" "$newname"; \
+	done && echo "Renamed macOS artifacts"
 
 ## dist-mac-arm64: Package for macOS arm64 only (smaller, Apple Silicon)
 dist-mac-arm64: build-daemon-mac-arm64 build-electron
 	npx electron-builder --mac --arm64
+	@cd release && for f in axons-desktop-mac-arm64.*; do \
+		[ -f "$f" ] || continue; \
+		newname="$(echo "$f" | sed 's/axons-desktop-mac-arm64/axons-desktop-macos-arm64/')"; \
+		[ "$f" = "$newname" ] || mv "$f" "$newname"; \
+	done && echo "Renamed macOS arm64 artifacts"
 
 ## dist-mac-x64: Package for macOS x64 only (smaller, Intel Mac)
 dist-mac-x64: build-daemon-mac-x64 build-electron
 	npx electron-builder --mac --x64
+	@cd release && for f in axons-desktop-mac-x64.*; do \
+		[ -f "$f" ] || continue; \
+		newname="$(echo "$f" | sed 's/axons-desktop-mac-x64/axons-desktop-macos-intel/')"; \
+		[ "$f" = "$newname" ] || mv "$f" "$newname"; \
+	done && echo "Renamed macOS x64 artifacts"
 
 ## dist-win: Package for Windows (NSIS installer)
 dist-win:

@@ -3,7 +3,7 @@
 ; https://nsis.sourceforge.io/
 
 !define APP_NAME "Axons"
-!define APP_VERSION "1.0.0"
+!define APP_VERSION "1.1.0"
 !define APP_PUBLISHER "Axons Team"
 !define APP_URL "https://axons.dev"
 !define APP_GUID "axons-desktop-app"
