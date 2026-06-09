@@ -95,7 +95,8 @@
     "previous": "Previous",
     "next": "Next",
     "copyCode": "Copy code",
-    "editFile": "Edit file"
+    "editFile": "Edit file",
+    "unsupportedFileType": "This file is binary and cannot be previewed as text"
   },
   "changeList": {
     "previewDiff": "Preview diff",

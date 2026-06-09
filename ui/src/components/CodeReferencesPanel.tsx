@@ -101,6 +101,9 @@ export const CodeReferencesPanel = React.memo(function CodeReferencesPanel({ onC
   // Binary preview: stores mimeType when backend indicates isBinary
   const [binaryMimeType, setBinaryMimeType] = useState<string | null>(null);
 
+  // Unsupported file type: set when backend returns 415
+  const [unsupportedFileType, setUnsupportedFileType] = useState(false);
+
   // Markdown preview mode (for .md files)
   const [mdPreviewMode, setMdPreviewMode] = useState(true); // true = preview, false = source
 
@@ -311,6 +314,8 @@ export const CodeReferencesPanel = React.memo(function CodeReferencesPanel({ onC
     // Clear stale content immediately before fetching new file,
     // preventing the previous file's content from showing under the new file's path.
     setCodeContent(null);
+    setUnsupportedFileType(false);
+    setBinaryMimeType(null);
 
     // Fetch from server if not cached
     setCodeLoading(true);
@@ -321,13 +326,19 @@ export const CodeReferencesPanel = React.memo(function CodeReferencesPanel({ onC
     fetch(`/api/file?${params.toString()}`)
       .then(res => res.json())
       .then(data => {
-        const content = data.content ?? null;
-        if (content !== null) {
-          setCachedFile(filePath, content);
-        }
         // If backend indicates this is a binary/image file, store MIME type
         if (data.isBinary === 'true' && data.mimeType) {
           setBinaryMimeType(data.mimeType);
+        }
+        // Non-previewable binary file (no MIME type = not image/video)
+        if (data.isBinary === 'true' && !data.mimeType) {
+          setUnsupportedFileType(true);
+          setCodeContent(null);
+          return;
+        }
+        const content = data.content ?? null;
+        if (content !== null) {
+          setCachedFile(filePath, content);
         }
         setCodeContent(content);
       })
@@ -837,6 +848,11 @@ export const CodeReferencesPanel = React.memo(function CodeReferencesPanel({ onC
                   )}
               </div>
                     )
+              ) : unsupportedFileType ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-text-muted text-sm gap-2">
+                  <Code2 className="w-8 h-8 opacity-30" />
+                  <span>{t('codeRef.unsupportedFileType')}</span>
+                </div>
             ) : (
               <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
                     {(nodeData?.label === 'File' || activeFilePath) ? 'No code content available' : 'Select a file to view code'}

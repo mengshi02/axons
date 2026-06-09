@@ -1085,6 +1085,56 @@ func (s *Server) resolveFilePath(filePath string, projectID string) string {
 	return absPath
 }
 
+// zeroByteDetectionBufferMaxLen is the maximum number of bytes to scan
+// when detecting binary content. Matches VS Code's ZERO_BYTE_DETECTION_BUFFER_MAX_LEN.
+const zeroByteDetectionBufferMaxLen = 512
+
+// isContentBinary checks whether file content appears to be binary by scanning
+// the first 512 bytes for NULL (0x00) bytes. This follows the same approach as
+// VS Code's detectEncodingFromBuffer: if a NULL byte is found and the content
+// doesn't look like UTF-16, it's considered binary.
+func isContentBinary(data []byte) bool {
+	n := len(data)
+	if n > zeroByteDetectionBufferMaxLen {
+		n = zeroByteDetectionBufferMaxLen
+	}
+
+	couldBeUTF16LE := true // e.g. 0xAA 0x00
+	couldBeUTF16BE := true // e.g. 0x00 0xAA
+	containsZeroByte := false
+
+	for i := 0; i < n; i++ {
+		isEndian := (i % 2 == 1) // assume 2-byte sequences typical for UTF-16
+		isZeroByte := (data[i] == 0)
+
+		if isZeroByte {
+			containsZeroByte = true
+		}
+
+		// UTF-16 LE: expect e.g. 0xAA 0x00
+		if couldBeUTF16LE && (isEndian && !isZeroByte || !isEndian && isZeroByte) {
+			couldBeUTF16LE = false
+		}
+
+		// UTF-16 BE: expect e.g. 0x00 0xAA
+		if couldBeUTF16BE && (isEndian && isZeroByte || !isEndian && !isZeroByte) {
+			couldBeUTF16BE = false
+		}
+
+		// Return if this is neither UTF16-LE nor UTF16-BE and thus treat as binary
+		if isZeroByte && !couldBeUTF16LE && !couldBeUTF16BE {
+			return true
+		}
+	}
+
+	// If contains zero byte but could be UTF-16, it's not binary
+	if containsZeroByte {
+		return false // treat as text (UTF-16)
+	}
+
+	return false
+}
+
 // binaryExtensions maps file extensions to MIME types for binary file preview.
 // This includes image formats (rendered via <img>) and video formats (rendered via <video>).
 var binaryExtensions = map[string]string{
@@ -1107,7 +1157,12 @@ var binaryExtensions = map[string]string{
 	".m4v":  "video/mp4",
 }
 
-// handleFileGet handles GET requests to read file content
+// handleFileGet handles GET requests to read file content.
+// Strategy (matches VS Code's approach):
+//  1. Known binary preview extensions (image/video) → return base64 with MIME type
+//  2. Other files → read content, detect if binary via NULL-byte scanning
+//  3. If binary → return isBinary flag so frontend shows "cannot preview"
+//  4. If text → return content as-is
 func (s *Server) handleFileGet(w http.ResponseWriter, absPath string) {
 	content, err := os.ReadFile(absPath)
 	if err != nil {
@@ -1120,10 +1175,9 @@ func (s *Server) handleFileGet(w http.ResponseWriter, absPath string) {
 	}
 
 	ext := strings.ToLower(filepath.Ext(absPath))
+
+	// 1. Known binary preview files (image/video): return base64 with MIME type
 	if mimeType, ok := binaryExtensions[ext]; ok {
-		// Binary file (image/video): return base64-encoded content with MIME type so
-		// the frontend can render it via a data URL instead of showing
-		// garbled binary text.
 		encoded := base64.StdEncoding.EncodeToString(content)
 		writeJSON(w, http.StatusOK, map[string]string{
 			"content":  encoded,
@@ -1134,7 +1188,18 @@ func (s *Server) handleFileGet(w http.ResponseWriter, absPath string) {
 		return
 	}
 
-	// Return JSON format for compatibility with frontend (expects data.content)
+	// 2. For other files, detect if content is binary by scanning for NULL bytes.
+	//    This follows VS Code's detectEncodingFromBuffer approach.
+	if isContentBinary(content) {
+		writeJSON(w, http.StatusOK, map[string]string{
+			"content":  "",
+			"path":     absPath,
+			"isBinary": "true",
+		})
+		return
+	}
+
+	// 3. Text file: return content as-is
 	writeJSON(w, http.StatusOK, map[string]string{
 		"content": string(content),
 		"path":    absPath,
