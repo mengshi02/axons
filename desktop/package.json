@@ -16,7 +16,7 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "electron": "^35.0.0",
+    "electron": "^40.4.1",
     "electron-builder": "^26.0.0",
     "typescript": "~5.9.3"
   },
@@ -27,9 +27,9 @@
       "output": "release"
     },
     "files": [
-      "dist/**/*",
-      "bin/**/*"
+      "dist/**/*"
     ],
+    "afterPack": "./scripts/afterPack.js",
     "extraResources": [
       {
         "from": "bin/axons-daemon",
@@ -37,25 +37,29 @@
       }
     ],
     "mac": {
+      "icon": "build/appicon.png",
       "category": "public.app-category.developer-tools",
       "target": [
         {
           "target": "dmg",
           "arch": [
-            "universal"
+            "x64",
+            "arm64"
           ]
         },
         {
           "target": "zip",
           "arch": [
-            "universal"
+            "x64",
+            "arm64"
           ]
         }
       ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "x64ArchFiles": "**/axons-daemon"
     },
     "dmg": {
       "contents": [

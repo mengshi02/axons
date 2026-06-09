@@ -66,42 +66,39 @@ async function startDaemon(): Promise<string> {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    daemonProcess.stdout?.on('data', (data: Buffer) => {
-      const line = data.toString().trim();
-      console.log('[daemon]', line);
+    let resolved = false;
+    const tryResolve = (port: number) => {
+      if (resolved) return;
+      resolved = true;
+      daemonPort = port;
+      console.log(`Daemon ready at 127.0.0.1:${port}`);
+      resolve(`127.0.0.1:${port}`);
+    };
 
-      // Daemon prints its listen address when ready (supports IPv4 and IPv6 like [::])
-      const addrMatch = line.match(/Web UI available at http:\/\/\[[\d:]+\]:(\d+)/)
-        ?? line.match(/Web UI available at http:\/\/[\d.]+:(\d+)/)
-        ?? line.match(/"url":"http:\/\/\[[\d:]+\]:(\d+)/)
-        ?? line.match(/"url":"http:\/\/[\d.]+:(\d+)/)
-        ?? line.match(/listening on\s+(?:127\.0\.0\.1|0\.0\.0\.0):(\d+)/i)
-        ?? line.match(/addr=127\.0\.0\.1:(\d+)/)
-        ?? line.match(/port=(\d+)/);
-      if (addrMatch) {
-        daemonPort = parseInt(addrMatch[1], 10);
+    // Parse port from daemon output and health-check immediately
+    const parsePort = (data: Buffer) => {
+      const s = data.toString();
+      console.log('[daemon]', s.trim());
+      const m = s.match(/Web UI available at http:\/\/\[[\d:]+\]:(\d+)/)
+        ?? s.match(/Web UI available at http:\/\/[\d.]+:(\d+)/)
+        ?? s.match(/"url":"http:\/\/\[[\d:]+\]:(\d+)/)
+        ?? s.match(/"url":"http:\/\/[\d.]+:(\d+)/)
+        ?? s.match(/listening on\s+(?:127\.0\.0\.1|0\.0\.0\.0):(\d+)/i)
+        ?? s.match(/addr=127\.0\.0\.1:(\d+)/)
+        ?? s.match(/port=(\d+)/);
+      if (m) {
+        const port = parseInt(m[1], 10);
+        // Port found — verify health then resolve immediately (no polling delay)
+        checkHealth(port).then((ok) => { if (ok && !resolved) tryResolve(port); });
       }
-    });
+    };
 
-    daemonProcess.stderr?.on('data', (data: Buffer) => {
-      console.error('[daemon:stderr]', data.toString().trim());
-
-      // Also check stderr for port info (supports both text and zap JSON formats, IPv4 and IPv6)
-      const addrMatch = data.toString().match(/Web UI available at http:\/\/\[[\d:]+\]:(\d+)/)
-        ?? data.toString().match(/Web UI available at http:\/\/[\d.]+:(\d+)/)
-        ?? data.toString().match(/"url":"http:\/\/\[[\d:]+\]:(\d+)/)
-        ?? data.toString().match(/"url":"http:\/\/[\d.]+:(\d+)/)
-        ?? data.toString().match(/listening on\s+(?:127\.0\.0\.1|0\.0\.0\.0):(\d+)/i)
-        ?? data.toString().match(/addr=127\.0\.0\.1:(\d+)/)
-        ?? data.toString().match(/port=(\d+)/);
-      if (addrMatch) {
-        daemonPort = parseInt(addrMatch[1], 10);
-      }
-    });
+    daemonProcess.stdout?.on('data', parsePort);
+    daemonProcess.stderr?.on('data', parsePort);
 
     daemonProcess.on('error', (err) => {
       console.error('Failed to start daemon:', err);
-      reject(err);
+      if (!resolved) reject(err);
     });
 
     daemonProcess.on('exit', (code) => {
@@ -109,25 +106,23 @@ async function startDaemon(): Promise<string> {
       daemonProcess = null;
     });
 
-    // Poll the daemon health endpoint until ready
+    // Safety fallback: poll health endpoint if port parsing missed it
     const pollHealth = async () => {
-      for (let i = 0; i < 100; i++) {
+      for (let i = 0; i < 200; i++) {
+        if (resolved) return;
         if (daemonPort > 0) {
           const ready = await checkHealth(daemonPort);
-          if (ready) {
-            console.log(`Daemon ready at 127.0.0.1:${daemonPort}`);
-            resolve(`127.0.0.1:${daemonPort}`);
-            return;
-          }
+          if (ready) { tryResolve(daemonPort); return; }
         }
-        await sleep(100);
+        await sleep(50);
       }
-      reject(new Error('Daemon failed to start within timeout'));
+      if (!resolved) reject(new Error('Daemon failed to start within timeout'));
     };
 
     pollHealth();
   });
 }
+
 
 /** Check daemon health endpoint */
 function checkHealth(port: number): Promise<boolean> {
@@ -163,8 +158,8 @@ function stopDaemon() {
 //  Window Management
 // ═══════════════════════════════════════════════════════════════
 
-/** Create the main application window */
-function createMainWindow(daemonAddr: string): BrowserWindow {
+/** Create the main application window (hidden, no URL loaded yet) */
+function createMainWindow(): BrowserWindow {
   // Icon path for Windows/Linux (PNG or ICO).
   // macOS gets the icon from the .app bundle's Info.plist at build time;
   // in dev mode we set the dock icon separately below.
@@ -192,13 +187,6 @@ function createMainWindow(daemonAddr: string): BrowserWindow {
     show: false,
   });
 
-  win.loadURL(`http://${daemonAddr}`);
-
-  // Show window when ready to avoid white flash
-  win.once('ready-to-show', () => {
-    win.show();
-  });
-
   // Handle main window close
   win.on('closed', () => {
     mainWindow = null;
@@ -207,6 +195,58 @@ function createMainWindow(daemonAddr: string): BrowserWindow {
 
   return win;
 }
+
+/** Show a splash window while daemon is starting */
+function createSplashWindow(): BrowserWindow {
+  const splash = new BrowserWindow({
+    width: 400,
+    height: 300,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    center: true,
+    show: false,
+    alwaysOnTop: true,
+  });
+
+  // Inline splash HTML — logo + spinner, no external files needed
+  splash.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(SPLASH_HTML)}`);
+  splash.once('ready-to-show', () => splash.show());
+
+  return splash;
+}
+
+const SPLASH_HTML = `<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 400px; height: 300px;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: #1a1a2e; color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    border-radius: 12px; overflow: hidden;
+  }
+  .logo { font-size: 32px; font-weight: 700; letter-spacing: 2px; margin-bottom: 24px; }
+  .spinner {
+    width: 28px; height: 28px;
+    border: 3px solid rgba(255,255,255,0.15);
+    border-top-color: #6c63ff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="logo">Axons</div>
+  <div class="spinner"></div>
+</body>
+</html>`;
+
+
 
 // ═══════════════════════════════════════════════════════════════
 //  IPC Handlers
@@ -368,10 +408,6 @@ function createAppMenu(daemonAddr: string) {
 app.whenReady().then(async () => {
   try {
     // Customize About panel
-    // Note: iconPath only works on Linux/Windows (not macOS).
-    // On macOS, the About panel icon comes from CFBundleIconFile in Info.plist.
-    // In dev mode, dev.js patches electron.icns; in packaged builds,
-    // electron-builder sets the icon from the build config.
     const aboutOptions: Electron.AboutPanelOptionsOptions = {
       applicationName: APP_NAME,
       applicationVersion: app.getVersion(),
@@ -393,11 +429,17 @@ app.whenReady().then(async () => {
       app.dock.setIcon(dockIcon);
     }
 
-    // Start Go daemon
-    const daemonAddr = await startDaemon();
+    // Show splash window immediately for perceived speed
+    const splash = createSplashWindow();
 
-    // Create main window
-    mainWindow = createMainWindow(daemonAddr);
+    // Start daemon and create main window in parallel
+    const [daemonAddr] = await Promise.all([
+      startDaemon(),
+      Promise.resolve((mainWindow = createMainWindow())),
+    ]);
+
+    // Load daemon URL into main window
+    mainWindow.loadURL(`http://${daemonAddr}`);
 
     // Register IPC handlers
     registerIpcHandlers(daemonAddr);
@@ -405,10 +447,17 @@ app.whenReady().then(async () => {
     // Set application menu
     createAppMenu(daemonAddr);
 
+    // Show main window when ready, then destroy splash
+    mainWindow.once('ready-to-show', () => {
+      splash.destroy();
+      mainWindow?.show();
+    });
+
     // macOS: re-create window when clicking dock icon
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        mainWindow = createMainWindow(daemonAddr);
+        mainWindow = createMainWindow();
+        mainWindow.loadURL(`http://${daemonAddr}`);
       } else if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.show();
       }

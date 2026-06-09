@@ -19,8 +19,8 @@ LDFLAGS := -ldflags "\
 
 # ── PHONY ────────────────────────────────────────────────────────────────────
 
-.PHONY: all dev build build-daemon build-electron \
-        dist dist-mac dist-win dist-linux \
+.PHONY: all dev build build-daemon build-daemon-mac build-daemon-mac-arm64 build-daemon-mac-x64 build-electron \
+        dist dist-mac dist-mac-arm64 dist-mac-x64 dist-win dist-linux \
         install clean help
 
 # ── Default ──────────────────────────────────────────────────────────────────
@@ -50,6 +50,31 @@ build-daemon:
 	cd $(ROOT_DIR) && go build $(LDFLAGS) -o desktop/$(DAEMON_BIN) ./cmd/axons/
 	@echo "Daemon built: $(DAEMON_BIN)"
 
+## build-daemon-mac: Build the Go daemon for both macOS architectures (x64 + arm64)
+build-daemon-mac:
+	@echo "Building Go daemon for macOS x64..."
+	@mkdir -p bin
+	cd $(ROOT_DIR) && GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o desktop/bin/$(BINARY_NAME)-x64 ./cmd/axons/
+	@echo "Daemon built: bin/$(BINARY_NAME)-x64"
+	@echo "Building Go daemon for macOS arm64..."
+	cd $(ROOT_DIR) && GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o desktop/bin/$(BINARY_NAME)-arm64 ./cmd/axons/
+	@echo "Daemon built: bin/$(BINARY_NAME)-arm64"
+	@echo "Copying host-arch binary as default for development..."
+	@cp "bin/$(BINARY_NAME)-$(shell uname -m | sed 's/x86_64/x64/')" "bin/$(BINARY_NAME)"
+	@echo "Both architectures built."
+
+## build-daemon-mac-arm64: Build the Go daemon for macOS arm64 only
+build-daemon-mac-arm64:
+	@mkdir -p bin
+	cd $(ROOT_DIR) && GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o desktop/bin/$(BINARY_NAME) ./cmd/axons/
+	@echo "Daemon built: bin/$(BINARY_NAME) (arm64)"
+
+## build-daemon-mac-x64: Build the Go daemon for macOS x64 only
+build-daemon-mac-x64:
+	@mkdir -p bin
+	cd $(ROOT_DIR) && GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o desktop/bin/$(BINARY_NAME) ./cmd/axons/
+	@echo "Daemon built: bin/$(BINARY_NAME) (x64)"
+
 ## build-electron: Compile TypeScript Electron main process
 build-electron:
 	@echo "Compiling Electron main process..."
@@ -64,9 +89,17 @@ build-electron:
 dist: build
 	npm run dist
 
-## dist-mac: Package for macOS (DMG + ZIP)
-dist-mac: build
-	npm run dist:mac
+## dist-mac: Package for macOS universal (DMG + ZIP)
+dist-mac: build-daemon-mac build-electron
+	npx electron-builder --mac --universal
+
+## dist-mac-arm64: Package for macOS arm64 only (smaller, Apple Silicon)
+dist-mac-arm64: build-daemon-mac-arm64 build-electron
+	npx electron-builder --mac --arm64
+
+## dist-mac-x64: Package for macOS x64 only (smaller, Intel Mac)
+dist-mac-x64: build-daemon-mac-x64 build-electron
+	npx electron-builder --mac --x64
 
 ## dist-win: Package for Windows (NSIS installer)
 dist-win:
