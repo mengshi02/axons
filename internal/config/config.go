@@ -134,6 +134,15 @@ type TerminalConfig struct {
 
 	// Session timeout in minutes
 	SessionTimeout int `json:"session_timeout" yaml:"session_timeout"`
+
+	// Persistent session revive mode (P3-3)
+	// Values: "onExit" (default), "onExitAndWindowClose", "never"
+	// Aligns with IDE terminal.integrated.persistentSessionReviveProcess
+	PersistentSessionReviveProcess string `json:"persistent_session_revive_process" yaml:"persistent_session_revive_process"`
+
+	// Snapshot directory for terminal persistence (P3)
+	// Default: ~/.axons/terminal-snapshots
+	SnapshotDir string `json:"snapshot_dir" yaml:"snapshot_dir"`
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -179,6 +188,8 @@ func DefaultConfig() *Config {
 			Enabled:        true,
 			MaxSessions:    20, // Increased from 5 to 20
 			SessionTimeout: 30, // 30 minutes
+			PersistentSessionReviveProcess: "onExit", // IDE default
+			SnapshotDir:    "", // Use default: ~/.axons/terminal-snapshots
 		},
 	}
 }

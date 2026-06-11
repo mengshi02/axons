@@ -148,7 +148,27 @@ func (w *wsWriter) Err() <-chan error {
 func InitTerminalManager(cfg terminal.ManagerConfig) {
 	terminalMgrOnce.Do(func() {
 		terminalMgr = terminal.NewManager(cfg)
+		// Start orphan request processor
+		go processOrphanRequests()
+		// Start detach processor
+		go processDetachRequests()
 	})
+}
+
+// processOrphanRequests reads from the manager's orphan request channel
+// and broadcasts orphan_req to the frontend via the session's output subscribers.
+func processOrphanRequests() {
+	for sessionID := range terminalMgr.OrphanReqCh() {
+		terminalMgr.BroadcastOrphanReq(sessionID)
+	}
+}
+
+// processDetachRequests reads from the manager's detach channel
+// and broadcasts detach message to the frontend before session is killed.
+func processDetachRequests() {
+	for sessionID := range terminalMgr.DetachCh() {
+		terminalMgr.BroadcastDetach(sessionID)
+	}
 }
 
 // GetTerminalManager returns the terminal manager instance.
@@ -316,6 +336,18 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request, params
 		cancel()
 	})
 
+	// P4-2: Set up hasChildProcesses callback to push state changes to frontend.
+	// Aligns with IDE ProcessPropertyType.HasChildProcesses.
+	session.SetOnHasChildProcs(func(sid string, has bool) {
+		msg := terminal.NewHasChildProcessesMessage(has)
+		data, err := terminal.EncodeMessage(msg)
+		if err != nil {
+			zap.L().Error("Failed to encode has_child_processes", zap.Error(err))
+			return
+		}
+		writer.Write(data)
+	})
+
 	// Track if user explicitly closed the terminal (vs accidental disconnect)
 	userInitiatedClose := false
 
@@ -373,27 +405,101 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request, params
 				// User explicitly closed the terminal - mark and kill session
 				userInitiatedClose = true
 				zap.L().Debug("User initiated close, killing session", zap.String("sessionID", sessionID))
+				// Send detach before killing so frontend stops reconnecting
+				detachMsg := terminal.NewDetachMessage()
+				detachData, _ := terminal.EncodeMessage(detachMsg)
+				writer.WriteAndWait(detachData)
 				terminalMgr.KillSession(sessionID)
 				goto cleanup
 
 			case terminal.MessageTypeResume:
-				// Client requests replay from a sequence number
-				sinceSeq := msg.Seq
-				entries := session.ReplaySince(sinceSeq)
-				if len(entries) > 0 {
-					// Send replayed output as a single batch message
-					var replayData strings.Builder
-					for _, entry := range entries {
-						replayData.Write(entry.Data)
+				// Client reconnects: send serialized terminal state via headless terminal
+				// This replaces the old RingBuffer replay approach with IDE's
+				// XtermSerializer pattern: reconstruct terminal state from VT state machine.
+				//
+				// P2-2: Set inReplay=true during replay to discard stale input/resize,
+				// then set inReplay=false after replay completes.
+				// Aligns with IDE PersistentTerminalProcess._inReplay.
+				session.SetInReplay(true)
+				if session.Serializer() != nil {
+					resultCh := session.Serializer().Serialize(sessionID, true)
+					// Wait for async serialization result (with timeout)
+					select {
+					case result := <-resultCh:
+						if result.Err != nil {
+							zap.L().Error("Serializer error on resume",
+								zap.String("sessionID", sessionID), zap.Error(result.Err))
+							// Fall back to RingBuffer replay
+							entries := session.ReplaySince(msg.Seq)
+							if len(entries) > 0 {
+								var replayData strings.Builder
+								for _, entry := range entries {
+									replayData.Write(entry.Data)
+								}
+								replayMsg := terminal.NewReplayMessage(replayData.String())
+								data, _ := terminal.EncodeMessage(replayMsg)
+								writer.Write(data)
+							}
+						} else {
+							// Send serialized ANSI stream to reconstruct terminal state
+							// P2-2: Include cols/rows for frontend OverrideDimensions
+							var sCols, sRows uint16
+							if c, r, ok := session.Serializer().Size(sessionID); ok {
+								sCols = uint16(c)
+								sRows = uint16(r)
+							}
+							serializeMsg := terminal.NewSerializeMessage(result.Data, sCols, sRows)
+							data, _ := terminal.EncodeMessage(serializeMsg)
+							writer.Write(data)
+						}
+					case <-time.After(5 * time.Second):
+						zap.L().Warn("Serializer timeout on resume, falling back to RingBuffer replay",
+							zap.String("sessionID", sessionID))
+						// Fall back to RingBuffer replay
+						entries := session.ReplaySince(msg.Seq)
+						if len(entries) > 0 {
+							var replayData strings.Builder
+							for _, entry := range entries {
+								replayData.Write(entry.Data)
+							}
+							replayMsg := terminal.NewReplayMessage(replayData.String())
+							data, _ := terminal.EncodeMessage(replayMsg)
+							writer.Write(data)
+						}
 					}
-					replayMsg := terminal.NewReplayMessage(replayData.String())
-					data, _ := terminal.EncodeMessage(replayMsg)
-					writer.Write(data)
+				} else {
+					// No serializer: fall back to RingBuffer replay (pre-P1 behavior)
+					entries := session.ReplaySince(msg.Seq)
+					if len(entries) > 0 {
+						var replayData strings.Builder
+						for _, entry := range entries {
+							replayData.Write(entry.Data)
+						}
+						replayMsg := terminal.NewReplayMessage(replayData.String())
+						data, _ := terminal.EncodeMessage(replayMsg)
+						writer.Write(data)
+					}
 				}
 				// Send sync message with current sequence number
 				syncMsg := terminal.NewSyncMessage(session.LatestSeq())
 				data, _ := terminal.EncodeMessage(syncMsg)
 				writer.Write(data)
+
+				// P2-2: Replay complete — end inReplay state so normal input/resize resume
+				session.SetInReplay(false)
+
+			case terminal.MessageTypeOrphanAck:
+				// Frontend confirmed it's alive — cancel orphan state
+				session.OnOrphanAck()
+				zap.L().Info("Received orphan_ack from frontend",
+					zap.String("sessionID", sessionID))
+
+			case terminal.MessageTypeReplayComplete:
+				// P2-2: Frontend finished replay — end inReplay state so normal I/O resumes.
+				// Aligns with IDE onProcessReplayComplete.
+				session.SetInReplay(false)
+				zap.L().Debug("Replay complete from frontend",
+					zap.String("sessionID", sessionID))
 			}
 		}
 	}
@@ -518,6 +624,23 @@ func (s *Server) handleTerminalResize(w http.ResponseWriter, r *http.Request, pa
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleTerminalRevive restores terminal sessions from disk snapshots on restart.
+// Aligns with IDE reviveTerminalProcesses.
+// GET /api/terminal/revive → returns list of revived sessions with replay data.
+func (s *Server) handleTerminalRevive(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	if terminalMgr == nil {
+		http.Error(w, "terminal feature not enabled", http.StatusServiceUnavailable)
+		return
+	}
+
+	results := terminalMgr.ReviveSessions()
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(results); err != nil {
+		zap.L().Error("Failed to encode revive results", zap.Error(err))
+	}
 }
 
 // handleTerminalKillAll kills all terminal sessions.

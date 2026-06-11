@@ -1,6 +1,6 @@
 module github.com/mengshi02/axons
 
-go 1.25.0
+go 1.25.1
 
 require (
 	github.com/fsnotify/fsnotify v1.9.0
@@ -30,6 +30,11 @@ require (
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/creack/pty v1.1.21 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
+	github.com/danielgatis/go-ansicode v1.0.14 // indirect
+	github.com/danielgatis/go-headless-term v1.0.9 // indirect
+	github.com/danielgatis/go-iterator v0.0.1 // indirect
+	github.com/danielgatis/go-utf8 v1.0.1 // indirect
+	github.com/danielgatis/go-vte v1.0.11 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
@@ -50,6 +55,7 @@ require (
 	github.com/skeema/knownhosts v1.3.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/u-root/u-root v0.11.0 // indirect
+	github.com/unilibs/uniwidth v0.1.0 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.uber.org/multierr v1.10.0 // indirect

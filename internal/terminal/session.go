@@ -35,10 +35,37 @@ const (
 	StateExited
 )
 
+// InteractionState controls serialization strategy (IDE three-state).
+// None: terminal has never been interacted with
+// ReplayOnly: only replayed data, no direct user interaction
+// Session: user has directly interacted (input/setTitle/setIcon)
+type InteractionState int32
+
+const (
+	InteractionNone      InteractionState = 0
+	InteractionReplayOnly InteractionState = 1
+	InteractionSession    InteractionState = 2
+)
+
+// Grace time defaults (IDE PersistentTerminalProcess alignment)
+const (
+	graceTime          = 5 * time.Minute          // Long grace: 5min on detach
+	shortGraceTime     = 30 * time.Second         // Short grace: 30s after orphan confirmation
+	orphanBarrier      = 4 * time.Second          // Barrier timeout waiting for orphan_ack
+	conptyResizeDelay  = 200 * time.Millisecond   // P5-3: ConPty resize delay after spawn (Windows only)
+)
+
 // OutputEntry represents a single output entry with sequence number.
 type OutputEntry struct {
 	Seq  uint64
 	Data []byte
+}
+
+// resizeRequest holds a pending resize for delayed ConPty resize (P5-3).
+type resizeRequest struct {
+	cols uint16
+	rows uint16
+	time.Time // when the request was made
 }
 
 // Session represents a single terminal session.
@@ -63,6 +90,55 @@ type Session struct {
 	// Exit listeners (append-only, never overwrite)
 	exitMu       sync.RWMutex
 	exitListeners []func(code int)
+
+	// Grace time (IDE PersistentTerminalProcess dual-layer timeout)
+	// Layer 1 (graceTime): on detach, start 5min timer → if no reconnect, proceed to orphan check
+	// Layer 2 (shortGraceTime): after orphan confirmation, start 30s timer → if no reconnect, kill session
+	disconnectAt atomic.Int64 // ms timestamp of disconnect; 0 means connected
+	graceTimer1  *time.Timer  // long grace (5min) — started on detach
+	graceTimer2  *time.Timer  // short grace (30s) — started after orphan confirmation
+
+	// Orphan confirmation state (IDE AutoOpenBarrier pattern)
+	orphanMu       sync.Mutex
+	orphanBarrier  *time.Timer // 4s barrier waiting for orphan_ack
+	orphanAcked    atomic.Bool // true if frontend confirmed it's alive
+	orphanConfirmed atomic.Bool // true if orphan (frontend dead) confirmed after barrier timeout
+	onOrphanReq    func(sessionID string) // callback to send orphan_req to frontend
+	onDetach       func(sessionID string) // callback to send detach to frontend before killing
+
+	// InteractionState (IDE three-state: None → ReplayOnly → Session)
+	interactionState atomic.Int32 // 0=None, 1=ReplayOnly, 2=Session
+
+	// Serializer for VT state machine synchronization (IDE XtermSerializer equivalent).
+	// Every PTY output byte is dual-written to both RingBuffer (for replay fallback)
+	// and the headless terminal (for ANSI serialization on reconnect).
+	serializer *NativeSerializer
+
+	// Periodic snapshot: every 30s, serialize headless terminal and persist to disk.
+	// Aligns with IDE: session output triggers serialization (debounced).
+	snapshotTimer *time.Timer
+	lastSnapshot  atomic.Int64 // ms timestamp of last persisted snapshot
+	onSnapshot    func(sessionID string) // callback to trigger snapshot persistence
+
+	// Replay state: during replay, input/signal/resize are discarded.
+	// Aligns with IDE PersistentTerminalProcess._inReplay.
+	inReplay atomic.Bool
+
+	// PersistManager for disk persistence (P3 Revive).
+	persistMgr *PersistManager
+
+	// ChildProcessMonitor (P4: IDE ChildProcessMonitor alignment)
+	processMonitor *ChildProcessMonitor
+	hasChildProcs  atomic.Bool // true if session has running child processes
+	onHasChildProcs func(sessionID string, has bool) // callback to notify frontend
+
+	// Delayed resize for ConPty on Windows (P5-3).
+	// ConPty fails if resize comes too early after spawn — delay 200ms.
+	// On Unix this is unused (immediate resize works).
+	delayedResizeMu    sync.Mutex
+	delayedResizeTimer *time.Timer
+	pendingResize      *resizeRequest
+	spawnAt            time.Time // when the shell process was started (for ConPty delay calc)
 
 	// Context for cancellation
 	ctx    context.Context
@@ -110,7 +186,7 @@ func NewSession(id, cwd, shell string, cols, rows uint16) (*Session, error) {
 		detail := err.Error()
 		userMsg := fmt.Sprintf("failed to create PTY after retries: %s", detail)
 		if strings.Contains(detail, "device not configured") || strings.Contains(detail, "ENXIO") {
-			userMsg = "Terminal device unavailable — system PTY resources exhausted. Try closing other terminal applications (e.g. VS Code terminals) and retry."
+			userMsg = "Terminal device unavailable — system PTY resources exhausted. Try closing other terminal applications (e.g. IDE terminals) and retry."
 		}
 		return nil, errors.New(userMsg)
 	}
@@ -160,6 +236,17 @@ func NewSession(id, cwd, shell string, cols, rows uint16) (*Session, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Create serializer for VT state machine synchronization.
+	// Aligns with IDE: this._serializer = new XtermSerializer(...)
+	serializer := NewNativeSerializer()
+	scrollbackLines := 1000 // default scrollback for headless terminal
+	if err := serializer.Create(id, int(cols), int(rows), scrollbackLines); err != nil {
+		cancel() // Clean up context before returning
+		p.Close()
+		killProcessGroup(c.Process.Pid)
+		return nil, fmt.Errorf("failed to create serializer: %w", err)
+	}
+
 	session := &Session{
 		ID:          id,
 		PID:         c.Process.Pid,
@@ -171,15 +258,31 @@ func NewSession(id, cwd, shell string, cols, rows uint16) (*Session, error) {
 		state:       int32(StateRunning),
 		outputSubs:  make(map[string]chan OutputEntry),
 		ringBuf:     NewRingBuffer(2048), // ~2048 output entries for replay
+		serializer:  serializer,
+		spawnAt:     time.Now(),
 		ctx:         ctx,
 		cancel:      cancel,
 	}
+
+	// Initialize child process monitor (P4)
+	monitor := NewChildProcessMonitor(c.Process.Pid)
+	monitor.SetOnChange(func(has bool) {
+		session.hasChildProcs.Store(has)
+		if session.onHasChildProcs != nil {
+			session.onHasChildProcs(session.ID, has)
+		}
+	})
+	session.processMonitor = monitor
 
 	// Monitor process exit in background
 	go session.monitorExit(c.Process)
 
 	// Start output loop: reads from PTY and broadcasts to subscribers
 	go session.outputLoop()
+
+	// Start periodic snapshot goroutine (P1-6, every 30s)
+	// Aligns with IDE: serialize terminal state periodically for revive.
+	go session.snapshotLoop()
 
 	zap.L().Info("Terminal session created",
 		zap.String("id", id),
@@ -202,6 +305,11 @@ func (s *Session) Write(data []byte) error {
 		return fmt.Errorf("session not running")
 	}
 
+	// Discard input during replay (IDE: if (this._inReplay) { return; })
+	if s.inReplay.Load() {
+		return nil
+	}
+
 	s.mu.RLock()
 	pty := s.pty
 	s.mu.RUnlock()
@@ -214,6 +322,14 @@ func (s *Session) Write(data []byte) error {
 	if err != nil {
 		zap.L().Debug("Terminal write error", zap.String("id", s.ID), zap.Error(err))
 		return err
+	}
+
+	// Transition to Session interaction state on user input
+	s.TransitionToSession()
+
+	// Trigger child process monitor on input (P4: IDE debounce 1s)
+	if s.processMonitor != nil {
+		s.processMonitor.OnInput()
 	}
 
 	return nil
@@ -246,12 +362,44 @@ func (s *Session) Resize(cols, rows uint16) error {
 		return fmt.Errorf("session not running")
 	}
 
+	// Discard resize during replay (IDE: if (this._inReplay) { return; })
+	if s.inReplay.Load() {
+		return nil
+	}
+
 	// Validate size
 	if cols == 0 || rows == 0 {
 		return fmt.Errorf("invalid terminal size: %dx%d", cols, rows)
 	}
 	if cols > 500 || rows > 200 {
 		return fmt.Errorf("terminal size too large: %dx%d", cols, rows)
+	}
+
+	// P5-3: ConPty early resize delay on Windows.
+	// ConPty fails if resize comes too early after spawn — delay until 200ms
+	// after spawn. Aligns with VS Code DelayedResizer.
+	// On Unix, this is a no-op (immediate resize works).
+	if runtime.GOOS == "windows" {
+		elapsed := time.Since(s.spawnAt)
+		if elapsed < conptyResizeDelay {
+			// Buffer the resize request and schedule delayed execution
+			s.delayedResizeMu.Lock()
+			s.pendingResize = &resizeRequest{cols: cols, rows: rows, Time: time.Now()}
+			if s.delayedResizeTimer != nil {
+				s.delayedResizeTimer.Stop()
+			}
+			delay := conptyResizeDelay - elapsed
+			s.delayedResizeTimer = time.AfterFunc(delay, func() {
+				s.executeDelayedResize()
+			})
+			s.delayedResizeMu.Unlock()
+
+			// Synchronize headless terminal dimensions immediately (no ConPty risk)
+			if s.serializer != nil {
+				s.serializer.Resize(s.ID, int(cols), int(rows))
+			}
+			return nil
+		}
 	}
 
 	s.mu.RLock()
@@ -263,7 +411,58 @@ func (s *Session) Resize(cols, rows uint16) error {
 	}
 
 	err := pty.Resize(int(cols), int(rows))
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Synchronize headless terminal dimensions (VS Code: handleResize)
+	if s.serializer != nil {
+		if resizeErr := s.serializer.Resize(s.ID, int(cols), int(rows)); resizeErr != nil {
+			zap.L().Debug("Serializer resize error",
+				zap.String("id", s.ID), zap.Error(resizeErr))
+			// Non-critical: serializer resize failure should not block PTY resize
+		}
+	}
+
+	return nil
+}
+
+// executeDelayedResize applies a pending ConPty resize that was buffered
+// during the early spawn window (P5-3). Called by delayedResizeTimer
+// after conptyResizeDelay has elapsed since spawn.
+// Aligns with VS Code DelayedResizer: buffer early resizes, apply after delay.
+func (s *Session) executeDelayedResize() {
+	s.delayedResizeMu.Lock()
+	req := s.pendingResize
+	s.pendingResize = nil
+	s.delayedResizeTimer = nil
+	s.delayedResizeMu.Unlock()
+
+	if req == nil || !s.isRunning() {
+		return
+	}
+
+	s.mu.RLock()
+	pty := s.pty
+	s.mu.RUnlock()
+
+	if pty == nil {
+		return
+	}
+
+	if err := pty.Resize(int(req.cols), int(req.rows)); err != nil {
+		zap.L().Debug("Delayed ConPty resize failed",
+			zap.String("id", s.ID),
+			zap.Uint16("cols", req.cols),
+			zap.Uint16("rows", req.rows),
+			zap.Error(err))
+		return
+	}
+
+	zap.L().Debug("Applied delayed ConPty resize",
+		zap.String("id", s.ID),
+		zap.Uint16("cols", req.cols),
+		zap.Uint16("rows", req.rows))
 }
 
 // Close closes the terminal session.
@@ -280,6 +479,43 @@ func (s *Session) Close() error {
 	if s.cancel != nil {
 		s.cancel()
 	}
+
+	// Stop all grace timers
+	s.mu.Lock()
+	if s.graceTimer1 != nil {
+		s.graceTimer1.Stop()
+		s.graceTimer1 = nil
+	}
+	if s.graceTimer2 != nil {
+		s.graceTimer2.Stop()
+		s.graceTimer2 = nil
+	}
+	s.mu.Unlock()
+
+	// Stop orphan barrier
+	s.orphanMu.Lock()
+	if s.orphanBarrier != nil {
+		s.orphanBarrier.Stop()
+		s.orphanBarrier = nil
+	}
+	s.orphanMu.Unlock()
+
+	// Stop snapshot timer
+	s.mu.Lock()
+	if s.snapshotTimer != nil {
+		s.snapshotTimer.Stop()
+		s.snapshotTimer = nil
+	}
+	s.mu.Unlock()
+
+	// Stop delayed resize timer (P5-3 ConPty)
+	s.delayedResizeMu.Lock()
+	if s.delayedResizeTimer != nil {
+		s.delayedResizeTimer.Stop()
+		s.delayedResizeTimer = nil
+	}
+	s.pendingResize = nil
+	s.delayedResizeMu.Unlock()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -309,6 +545,19 @@ func (s *Session) Close() error {
 	}
 	s.outputMu.Unlock()
 
+	// Destroy serializer (IDE: this._serializer.dispose())
+	if s.serializer != nil {
+		if err := s.serializer.Destroy(s.ID); err != nil {
+			zap.L().Debug("Serializer destroy error",
+				zap.String("id", s.ID), zap.Error(err))
+		}
+	}
+
+	// Stop child process monitor
+	if s.processMonitor != nil {
+		s.processMonitor.Stop()
+	}
+
 	return nil
 }
 
@@ -333,24 +582,42 @@ func (s *Session) AddOnExit(fn func(code int)) {
 // Subscribe registers a subscriber to receive output entries.
 // Returns a channel that will receive output entries and the current sequence number.
 // The subscriber must call Unsubscribe when done to prevent leaks.
+// On first subscribe after disconnect, triggers MarkReconnected (cancels grace timers).
 func (s *Session) Subscribe(subscriberID string) (<-chan OutputEntry, uint64) {
 	ch := make(chan OutputEntry, 4096)
 	s.outputMu.Lock()
 	s.outputSubs[subscriberID] = ch
 	currentSeq := s.outputSeq
+	subCount := len(s.outputSubs)
 	s.outputMu.Unlock()
+
+	// If this is a reconnect (session was disconnected), cancel grace timers
+	if s.IsDisconnected() && subCount > 0 {
+		s.MarkReconnected()
+	}
+
 	return ch, currentSeq
 }
 
 // Unsubscribe removes a subscriber.
+// When all subscribers are gone, triggers MarkDisconnected (starts grace timers).
 func (s *Session) Unsubscribe(subscriberID string) {
 	s.outputMu.Lock()
 	ch, ok := s.outputSubs[subscriberID]
 	if ok {
 		delete(s.outputSubs, subscriberID)
+	}
+	remaining := len(s.outputSubs)
+	s.outputMu.Unlock()
+
+	if ok {
 		close(ch)
 	}
-	s.outputMu.Unlock()
+
+	// When all subscribers are gone and session is still running, start grace timers
+	if remaining == 0 && s.isRunning() && !s.IsDisconnected() {
+		s.MarkDisconnected()
+	}
 }
 
 // broadcastOutput sends output data to all subscribers and writes to ring buffer.
@@ -407,6 +674,251 @@ func (s *Session) LatestSeq() uint64 {
 	s.outputMu.RLock()
 	defer s.outputMu.RUnlock()
 	return s.outputSeq
+}
+
+// HasActiveSubscriber returns true if there is at least one output subscriber.
+func (s *Session) HasActiveSubscriber() bool {
+	s.outputMu.RLock()
+	defer s.outputMu.RUnlock()
+	return len(s.outputSubs) > 0
+}
+
+// MarkDisconnected marks the session as disconnected and starts the long grace timer.
+// This is called when the last WebSocket subscriber disconnects.
+// Aligns with IDE PersistentTerminalProcess._disconnectRunner1 (graceTime).
+func (s *Session) MarkDisconnected() {
+	// Only start grace timer if not already disconnected
+	if s.disconnectAt.Load() != 0 {
+		return
+	}
+
+	s.disconnectAt.Store(time.Now().UnixMilli())
+	zap.L().Info("Terminal session disconnected, starting long grace timer",
+		zap.String("id", s.ID),
+		zap.Duration("graceTime", graceTime))
+
+	// Start long grace timer (5min). On expiry, begin orphan confirmation.
+	s.mu.Lock()
+	if s.graceTimer1 != nil {
+		s.graceTimer1.Stop()
+	}
+	s.graceTimer1 = time.AfterFunc(graceTime, func() {
+		s.beginOrphanCheck()
+	})
+	s.mu.Unlock()
+}
+
+// MarkReconnected marks the session as reconnected and cancels both grace timers.
+// This is called when a new WebSocket subscriber connects.
+func (s *Session) MarkReconnected() {
+	s.disconnectAt.Store(0)
+	s.orphanAcked.Store(false)
+	s.orphanConfirmed.Store(false)
+
+	s.mu.Lock()
+	if s.graceTimer1 != nil {
+		s.graceTimer1.Stop()
+		s.graceTimer1 = nil
+	}
+	if s.graceTimer2 != nil {
+		s.graceTimer2.Stop()
+		s.graceTimer2 = nil
+	}
+	s.mu.Unlock()
+
+	s.orphanMu.Lock()
+	if s.orphanBarrier != nil {
+		s.orphanBarrier.Stop()
+		s.orphanBarrier = nil
+	}
+	s.orphanMu.Unlock()
+
+	// Transition to Session interaction state on reconnect
+	s.interactionState.Store(int32(InteractionSession))
+
+	zap.L().Info("Terminal session reconnected, grace timers cancelled",
+		zap.String("id", s.ID))
+}
+
+// beginOrphanCheck starts the orphan confirmation protocol.
+// After long grace expires, send orphan_req and wait 4s for orphan_ack.
+// Aligns with IDE AutoOpenBarrier(4000) pattern.
+func (s *Session) beginOrphanCheck() {
+	zap.L().Info("Long grace expired, beginning orphan check",
+		zap.String("id", s.ID),
+		zap.Duration("barrier", orphanBarrier))
+
+	s.orphanMu.Lock()
+	if s.orphanBarrier != nil {
+		s.orphanBarrier.Stop()
+	}
+	s.orphanAcked.Store(false)
+
+	// Start barrier: wait 4s for orphan_ack
+	s.orphanBarrier = time.AfterFunc(orphanBarrier, func() {
+		s.onOrphanBarrierTimeout()
+	})
+	callback := s.onOrphanReq
+	s.orphanMu.Unlock()
+
+	// Trigger orphan_req callback to push orphan_req to all subscribers
+	if callback != nil {
+		callback(s.ID)
+	}
+}
+
+// OnOrphanAck handles receiving orphan_ack from the frontend.
+// Called when the frontend confirms it's alive.
+func (s *Session) OnOrphanAck() {
+	if s.orphanConfirmed.Load() {
+		return // Already confirmed as orphan, too late
+	}
+
+	s.orphanAcked.Store(true)
+
+	s.orphanMu.Lock()
+	if s.orphanBarrier != nil {
+		s.orphanBarrier.Stop()
+		s.orphanBarrier = nil
+	}
+	s.orphanMu.Unlock()
+
+	// Frontend is alive — reduce grace time to short (30s)
+	s.reduceGraceTime()
+
+	zap.L().Info("Orphan ack received, reduced to short grace",
+		zap.String("id", s.ID))
+}
+
+// onOrphanBarrierTimeout is called when 4s barrier expires without orphan_ack.
+// The frontend is confirmed orphan (dead) — send detach, then kill the session.
+func (s *Session) onOrphanBarrierTimeout() {
+	s.orphanConfirmed.Store(true)
+
+	zap.L().Info("Orphan barrier timeout, frontend confirmed orphan — killing session",
+		zap.String("id", s.ID))
+
+	// Send detach notification before killing
+	s.orphanMu.Lock()
+	detachCb := s.onDetach
+	s.orphanMu.Unlock()
+
+	if detachCb != nil {
+		detachCb(s.ID)
+	}
+
+	// Kill the session — no frontend is alive to reconnect
+	s.Close()
+}
+
+// reduceGraceTime stops the long grace timer and starts the short grace timer.
+// Aligns with IDE PersistentTerminalProcess.reduceGraceTime().
+func (s *Session) reduceGraceTime() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.graceTimer2 != nil {
+		return // Short grace already running
+	}
+
+	if s.graceTimer1 != nil {
+		s.graceTimer1.Stop()
+		s.graceTimer1 = nil
+	}
+
+	zap.L().Info("Reducing grace time to short grace",
+		zap.String("id", s.ID),
+		zap.Duration("shortGraceTime", shortGraceTime))
+
+	s.graceTimer2 = time.AfterFunc(shortGraceTime, func() {
+		zap.L().Info("Short grace expired — killing session",
+			zap.String("id", s.ID))
+
+		// Send detach before killing so frontend stops reconnecting
+		s.orphanMu.Lock()
+		detachCb := s.onDetach
+		s.orphanMu.Unlock()
+
+		if detachCb != nil {
+			detachCb(s.ID)
+		}
+
+		s.Close()
+	})
+}
+
+// IsDisconnected returns true if the session is currently in disconnected state.
+func (s *Session) IsDisconnected() bool {
+	return s.disconnectAt.Load() != 0
+}
+
+// DisconnectDuration returns how long the session has been disconnected.
+// Returns 0 if connected.
+func (s *Session) DisconnectDuration() time.Duration {
+	ms := s.disconnectAt.Load()
+	if ms == 0 {
+		return 0
+	}
+	return time.Duration(time.Now().UnixMilli()-ms) * time.Millisecond
+}
+
+// NeedsOrphanCheck returns true if the session is in disconnected state
+// and needs orphan_req to be sent to the frontend.
+func (s *Session) NeedsOrphanCheck() bool {
+	if s.disconnectAt.Load() == 0 {
+		return false // Still connected
+	}
+	// Needs check if barrier timer exists (means long grace expired
+	// and we're waiting for orphan_ack)
+	s.orphanMu.Lock()
+	needs := s.orphanBarrier != nil && !s.orphanAcked.Load()
+	s.orphanMu.Unlock()
+	return needs
+}
+
+// GetInteractionState returns the current interaction state.
+func (s *Session) GetInteractionState() InteractionState {
+	return InteractionState(s.interactionState.Load())
+}
+
+// TransitionToSession transitions the interaction state to Session
+// when the user directly interacts (input/setTitle/setIcon).
+func (s *Session) TransitionToSession() {
+	s.interactionState.Store(int32(InteractionSession))
+}
+
+// Serializer returns the session's NativeSerializer for VT state machine access.
+// Used by the API layer to serialize terminal state on reconnect.
+func (s *Session) Serializer() *NativeSerializer {
+	return s.serializer
+}
+
+// SetOnOrphanReq sets the callback invoked when orphan_req should be sent.
+// The handler layer uses this to push orphan_req via WebSocket.
+func (s *Session) SetOnOrphanReq(fn func(sessionID string)) {
+	s.orphanMu.Lock()
+	defer s.orphanMu.Unlock()
+	s.onOrphanReq = fn
+}
+
+// SetOnDetach sets the callback invoked before session is killed by grace timer.
+// The handler layer uses this to send detach message via WebSocket.
+func (s *Session) SetOnDetach(fn func(sessionID string)) {
+	s.orphanMu.Lock()
+	defer s.orphanMu.Unlock()
+	s.onDetach = fn
+}
+
+// HasChildProcesses returns whether the session currently has running child processes.
+// Aligns with IDE ProcessPropertyType.HasChildProcesses.
+func (s *Session) HasChildProcesses() bool {
+	return s.hasChildProcs.Load()
+}
+
+// SetOnHasChildProcs sets the callback invoked when hasChildProcesses changes.
+// The handler layer uses this to push has_child_processes to frontend via WebSocket.
+func (s *Session) SetOnHasChildProcs(fn func(sessionID string, has bool)) {
+	s.onHasChildProcs = fn
 }
 
 // monitorExit monitors the process exit.
@@ -567,6 +1079,137 @@ func (s *Session) outputLoop() {
 
 		// Broadcast accumulated output as a single entry.
 		s.broadcastOutput(accum)
+
+		// Dual-write to headless terminal (IDE: this._serializer.handleData(e))
+		// Every PTY output byte goes to both RingBuffer and VT state machine.
+		if s.serializer != nil {
+			if err := s.serializer.Write(s.ID, accum); err != nil {
+				zap.L().Debug("Serializer write error",
+					zap.String("id", s.ID), zap.Error(err))
+			}
+		}
+
+		// Trigger child process monitor on output (P4: IDE throttle 5s)
+		if s.processMonitor != nil {
+			s.processMonitor.OnOutput()
+		}
+	}
+}
+
+// snapshotLoop periodically serializes the headless terminal and persists snapshots.
+// Runs every 30s, aligning with IDE's periodic serialization for Revive.
+func (s *Session) snapshotLoop() {
+	const snapshotInterval = 30 * time.Second
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-time.After(snapshotInterval):
+			if !s.isRunning() {
+				return
+			}
+			s.takeSnapshot()
+		}
+	}
+}
+
+// takeSnapshot serializes the headless terminal and writes to disk via PersistManager.
+func (s *Session) takeSnapshot() {
+	if s.serializer == nil || s.persistMgr == nil {
+		return
+	}
+
+	resultCh := s.serializer.Serialize(s.ID, true)
+	select {
+	case result := <-resultCh:
+		if result.Err != nil {
+			zap.L().Debug("Snapshot serialization failed",
+				zap.String("id", s.ID), zap.Error(result.Err))
+			return
+		}
+
+		snap := &SessionSnapshot{
+			ID: s.ID,
+			ShellLaunchConfig: ShellLaunchConfig{
+				Executable: s.Shell,
+				Cwd:        s.CWD,
+			},
+			ReplayEvent: ReplayEvent{
+				Events: []ReplayEventEntry{
+					{Data: result.Data},
+				},
+				Commands: result.Commands,
+			},
+			Timestamp: time.Now().UnixMilli(),
+			Source:    "serialize",
+		}
+
+		if err := s.persistMgr.WriteSnapshot(snap); err != nil {
+			zap.L().Debug("Snapshot persistence failed",
+				zap.String("id", s.ID), zap.Error(err))
+			return
+		}
+
+		s.lastSnapshot.Store(time.Now().UnixMilli())
+	case <-time.After(5 * time.Second):
+		zap.L().Debug("Snapshot serialization timeout",
+			zap.String("id", s.ID))
+	}
+}
+
+// SetPersistManager sets the persist manager for disk persistence.
+func (s *Session) SetPersistManager(pm *PersistManager) {
+	s.persistMgr = pm
+}
+
+// SetOnSnapshot sets the callback for snapshot events (unused — persistMgr handles it).
+func (s *Session) SetOnSnapshot(fn func(sessionID string)) {
+	s.onSnapshot = fn
+}
+
+// IsInReplay returns true if the session is currently replaying serialized data.
+// During replay, input/signal/resize are discarded (IDE: _inReplay).
+func (s *Session) IsInReplay() bool {
+	return s.inReplay.Load()
+}
+
+// SetInReplay sets the replay state. Called by the API layer during resume.
+func (s *Session) SetInReplay(in bool) {
+	s.inReplay.Store(in)
+}
+
+// PersistTerminalState synchronously persists the terminal state for graceful shutdown.
+// Called during backend shutdown to ensure all sessions are persisted before exit.
+func (s *Session) PersistTerminalState() error {
+	if s.serializer == nil || s.persistMgr == nil {
+		return nil
+	}
+
+	resultCh := s.serializer.Serialize(s.ID, true)
+	select {
+	case result := <-resultCh:
+		if result.Err != nil {
+			return result.Err
+		}
+		snap := &SessionSnapshot{
+			ID: s.ID,
+			ShellLaunchConfig: ShellLaunchConfig{
+				Executable: s.Shell,
+				Cwd:        s.CWD,
+			},
+			ReplayEvent: ReplayEvent{
+				Events: []ReplayEventEntry{
+					{Data: result.Data},
+				},
+				Commands: result.Commands,
+			},
+			Timestamp: time.Now().UnixMilli(),
+			Source:    "serialize",
+		}
+		return s.persistMgr.WriteSnapshot(snap)
+	case <-time.After(10 * time.Second):
+		return fmt.Errorf("persist state timeout for session %s", s.ID)
 	}
 }
 

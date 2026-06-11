@@ -247,6 +247,24 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
   // Pending input buffer per tab (persists across reconnects)
   const pendingInputRef = useRef<Map<string, string[]>>(new Map());
 
+  // Track session exited/detached per tab — prevents reconnect after exit or detach
+  const sessionExitedRef = useRef<Map<string, boolean>>(new Map());
+  const sessionDetachedRef = useRef<Map<string, boolean>>(new Map());
+
+  // P2-2: Replay state per tab — aligns with IDE BasePty._inReplay.
+  // During replay, user input/resize are discarded (Go端已拦截，前端也同步禁止).
+  const isReplayingRef = useRef<Map<string, boolean>>(new Map());
+
+  // P4-3: Child process state per tab — aligns with IDE ProcessPropertyType.HasChildProcesses.
+  // When closing a tab with child processes, show confirmation dialog.
+  const hasChildProcessesRef = useRef<Map<string, boolean>>(new Map());
+
+  // Max reconnect attempts (IDE alignment: stop after 10 failures)
+  const MAX_RECONNECT_ATTEMPTS = 10;
+
+  // Max pending input buffer size (IDE alignment: 1024 items)
+  const MAX_PENDING_INPUT = 1024;
+
   // Cleanup all terminals on unmount
   useEffect(() => {
     return () => {
@@ -449,6 +467,13 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
 
     ws.onopen = () => {
       setError(null);
+
+      // Don't proceed if session has exited or been detached
+      if (sessionExitedRef.current.get(tabId) || sessionDetachedRef.current.get(tabId)) {
+        ws.close(1000, 'session_ended');
+        return;
+      }
+
       // Reset reconnect attempts on successful connection
       reconnectAttemptsRef.current.set(tabId, 0);
       startHeartbeat();
@@ -485,23 +510,107 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
         });
         // Update sequence tracking
         if (msg.seq) lastSeqRef.current.set(tabId, msg.seq);
+      } else if (msg.type === 'serialize' && currentInstance?.xterm) {
+        // IDE XtermSerializer pattern: reconstruct terminal state from ANSI stream.
+        // The serialized data contains scrollback + viewport + cursor + modes,
+        // fed to xterm.js via write() to rebuild the exact terminal state.
+        // This is the modern replacement for RingBuffer replay.
+        //
+        // P2-2: Replay flow aligned with IDE BasePty.handleReplay():
+        //   1. _inReplay = true (discard input/resize)
+        //   2. OverrideDimensions{forceExactSize: true} — prevents xterm auto-reflow
+        //   3. reset() + write(data) — rebuild terminal state
+        //   4. _inReplay = false
+        //   5. OverrideDimensions = undefined — remove override
+        //   6. Notify Go端replayComplete
+        isReplayingRef.current.set(tabId, true);
+        // OverrideDimensions: force exact cols/rows during replay (IDE: forceExactSize)
+        // xterm.js ITerminalOptions does not expose overrideDimensions — it's a
+        // IDE extension property. We set it via (options as any) to bypass TS.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const xtermOpts = currentInstance.xterm.options as any;
+        if (msg.cols && msg.rows) {
+          xtermOpts.overrideDimensions = {
+            cols: msg.cols,
+            rows: msg.rows,
+            forceExactSize: true,
+          };
+        }
+        currentInstance.xterm.reset();
+        const writePromise = new Promise<void>(resolve => {
+          currentInstance.xterm.write(msg.data, () => {
+            currentInstance.xterm.scrollToBottom();
+            resolve();
+          });
+        });
+        writePromise.then(() => {
+          // Replay complete: clear override and inReplay state
+          isReplayingRef.current.set(tabId, false);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (currentInstance.xterm.options as any).overrideDimensions = undefined;
+          // Notify Go端 that replay is complete (IDE: onProcessReplayComplete)
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'replay_complete' }));
+          }
+        });
       } else if (msg.type === 'replay' && currentInstance?.xterm) {
-        // Replayed historical output from server
+        // Replayed historical output from server (RingBuffer fallback)
+        // P2-2: Same replay flow as serialize, but without reset (data is additive)
+        isReplayingRef.current.set(tabId, true);
         const isAltBuffer = currentInstance.xterm.buffer.active.type === 'alternate';
         const buf = currentInstance.xterm.buffer.active;
         const wasAtBottom = buf.viewportY >= buf.baseY;
-        currentInstance.xterm.write(msg.data, () => {
-          if (!isAltBuffer && wasAtBottom) currentInstance.xterm.scrollToBottom();
+        const writePromise = new Promise<void>(resolve => {
+          currentInstance.xterm.write(msg.data, () => {
+            if (!isAltBuffer && wasAtBottom) currentInstance.xterm.scrollToBottom();
+            resolve();
+          });
+        });
+        writePromise.then(() => {
+          isReplayingRef.current.set(tabId, false);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (currentInstance.xterm.options as any).overrideDimensions = undefined;
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'replay_complete' }));
+          }
         });
       } else if (msg.type === 'sync') {
         // Server sent current sequence number after replay
         if (msg.seq) lastSeqRef.current.set(tabId, msg.seq);
+      } else if (msg.type === 'orphan_req') {
+        // IDE AutoOpenBarrier pattern: server asking if frontend is alive
+        // Reply immediately with orphan_ack to prevent session kill
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'orphan_ack' }));
+        }
+      } else if (msg.type === 'detach') {
+        // IDE: grace timer expired — session will be killed
+        // Disable input and stop reconnecting
+        if (currentInstance?.xterm) {
+          currentInstance.xterm.options.disableStdin = true;
+        }
+        sessionDetachedRef.current.set(tabId, true);
+        pendingInputRef.current.set(tabId, []); // Clear buffered input
+        currentInstance?.xterm?.write('\r\n\x1b[33m[Session detached — terminal process has been terminated]\x1b[0m\r\n');
+        stopHeartbeat();
+        stopReconnect();
       } else if (msg.type === 'exit') {
+        // IDE: process exited — disable input, clear pending, no reconnect
+        if (currentInstance?.xterm) {
+          currentInstance.xterm.options.disableStdin = true;
+        }
+        sessionExitedRef.current.set(tabId, true);
+        pendingInputRef.current.set(tabId, []); // Clear buffered input
         currentInstance?.xterm?.write(`\r\n\x1b[33m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
         stopHeartbeat();
         stopReconnect();
       } else if (msg.type === 'error') {
         setError(msg.data);
+      } else if (msg.type === 'has_child_processes') {
+        // P4-2: Child process state change notification.
+        // Aligns with IDE ProcessPropertyType.HasChildProcesses.
+        const has = msg.data === 'true';
+        hasChildProcessesRef.current.set(tabId, has);
       } else if (msg.type === 'pong') {
         // Heartbeat response - connection is alive
       }
@@ -518,9 +627,24 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
       // Check if this was a user-initiated close (normal closure with code 1000)
       const wasUserInitiated = event.code === 1000 && event.reason === 'user_close';
 
+      // Don't reconnect if session has exited or been detached
+      if (sessionExitedRef.current.get(tabId) || sessionDetachedRef.current.get(tabId)) {
+        return;
+      }
+
       if (!wasUserInitiated) {
-        // Get current reconnect attempt count from ref
         const currentAttempts = reconnectAttemptsRef.current.get(tabId) || 0;
+
+        // Check reconnect attempt limit (IDE: max 10 retries)
+        if (currentAttempts >= MAX_RECONNECT_ATTEMPTS) {
+          const currentInstance = terminalInstancesRef.current.get(tabId);
+          if (currentInstance?.xterm) {
+            currentInstance.xterm.options.disableStdin = true;
+            currentInstance.xterm.write('\r\n\x1b[31m[Connection lost — max reconnect attempts reached]\x1b[0m\r\n');
+          }
+          return;
+        }
+
         attemptReconnect(currentAttempts);
         reconnectAttemptsRef.current.set(tabId, currentAttempts + 1);
       }
@@ -529,16 +653,29 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
     // Handle terminal input
     if (instance?.xterm) {
       instance.xterm.onData((data) => {
+        // Don't buffer input if session has exited or been detached
+        if (sessionExitedRef.current.get(tabId) || sessionDetachedRef.current.get(tabId)) {
+          return;
+        }
+
+        // P2-2: Discard input during replay (IDE: if (this._inReplay) { return; })
+        if (isReplayingRef.current.get(tabId)) {
+          return;
+        }
+
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
             type: 'input',
             data,
           }));
         } else {
-          // Buffer input while disconnected
+          // Buffer input while disconnected (with size limit)
           const pending = pendingInputRef.current.get(tabId) || [];
-          pending.push(data);
-          pendingInputRef.current.set(tabId, pending);
+          if (pending.length < MAX_PENDING_INPUT) {
+            pending.push(data);
+            pendingInputRef.current.set(tabId, pending);
+          }
+          // If over limit, silently drop — prevents memory bloat
         }
       });
     }
@@ -999,6 +1136,16 @@ export const TerminalPanel = React.memo(function TerminalPanel({ onClose }: Pane
   // Close tab
   const closeTab = useCallback(async (tabId: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
+
+    // P4-3: Close confirmation dialog when session has child processes.
+    // Aligns with IDE: "Do you want to terminate running processes?"
+    const hasChildProcs = hasChildProcessesRef.current.get(tabId);
+    if (hasChildProcs) {
+      const confirmed = window.confirm(
+        t('terminal.confirmCloseWithChildProcesses', 'This terminal has running child processes. Are you sure you want to close it?')
+      );
+      if (!confirmed) return;
+    }
 
     const tab = tabs.find(t => t.id === tabId);
     if (tab) {

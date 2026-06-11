@@ -124,6 +124,8 @@ func NewServer(cfg *config.Config, taskMgr *task.Manager, mgr *db.Manager) *Serv
 	if cfg.Terminal.Enabled {
 		InitTerminalManager(terminal.ManagerConfig{
 			MaxSessions: cfg.Terminal.MaxSessions,
+			ReviveMode:  terminal.ReviveProcessMode(cfg.Terminal.PersistentSessionReviveProcess),
+			PersistDir:  cfg.Terminal.SnapshotDir,
 		})
 	}
 
@@ -484,6 +486,7 @@ func (s *Server) registerRoutes() {
 	s.router.GET("/api/terminal/sessions", s.handleTerminalList)
 	s.router.POST("/api/terminal/sessions/:id/resize", s.handleTerminalResize)
 	s.router.DELETE("/api/terminal/sessions", s.handleTerminalKillAll) // Kill all sessions
+	s.router.GET("/api/terminal/revive", s.handleTerminalRevive)        // Revive sessions on restart
 
 	// Plugin system routes
 	if s.pluginManager != nil {
